@@ -16,6 +16,15 @@ Production: https://portfolio-management-five-cyan.vercel.app
 - **Vercel** deploys on push to `main`. No build command, output directory `./`.
 - `config.js` holds the project URL and anon key. The anon key is a public client
   key by design; row level security is what actually guards the data.
+- **One deliberate exception to "no build step":** `middleware.ts` is Vercel
+  Routing Middleware, a soft link-share gate in front of the whole site (cookie
+  `dashboard_access`, unlocked by visiting with `?access=bmv2026`, rewrites
+  everyone else to `404.html`). It needs `package.json` and the `@vercel/functions`
+  dependency to build. **This is not real security** — it's a shared secret sitting
+  in plaintext in the repo, meant only to keep the URL from being casually
+  stumbled on or indexed before someone signs in. Supabase Auth is still the
+  actual access control; do not remove it or treat the middleware as a
+  replacement for it.
 
 ## Files
 
@@ -25,6 +34,9 @@ Production: https://portfolio-management-five-cyan.vercel.app
 | `config.js` | Supabase URL and anon key |
 | `supabase-schema.sql` | Schema plus seed. Idempotent, safe to re-run |
 | `launch.sh` | Clears git locks and pushes |
+| `middleware.ts` | Soft link-share gate (see Architecture). The one non-static piece |
+| `404.html` | Shown to anyone the middleware gate blocks |
+| `package.json`, `package-lock.json` | Only exist for `middleware.ts`'s `@vercel/functions` dependency |
 
 ## Data model
 
