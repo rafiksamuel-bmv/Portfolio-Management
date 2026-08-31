@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Not found — Portfolio Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --maroon:#7B1F2C; --maroon-bright:#A72A30;
+    --page:#F4F1F1; --surface:#FFFFFF; --border:#E5DADB;
+    --ink:#1C1517; --ink-soft:#5D5052;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --maroon:#8E2B39; --maroon-bright:#D97A82;
+      --page:#151011; --surface:#1D1719; --border:#33292B;
+      --ink:#EDE5E6; --ink-soft:#B0A2A4;
+    }
+  }
+  :root[data-theme="dark"]{
+    --maroon:#8E2B39; --maroon-bright:#D97A82;
+    --page:#151011; --surface:#1D1719; --border:#33292B;
+    --ink:#EDE5E6; --ink-soft:#B0A2A4;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--page); color:var(--ink); font-family:Archivo,-apple-system,"Segoe UI",sans-serif; }
+  .card{ text-align:center; padding:40px; }
+  .code{ font-size:13px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--maroon-bright); }
+  h1{ margin:10px 0 8px; font-size:26px; font-weight:700; letter-spacing:-.01em; }
+  p{ margin:0; color:var(--ink-soft); font-size:14.5px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="code">404</div>
+    <h1>Page not found</h1>
+    <p>This page doesn't exist, or you don't have access to it.</p>
+  </div>
+</body>
+</html>
