@@ -117,11 +117,22 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- ---------- 5. realtime ----------
-alter publication supabase_realtime add table public.companies;
-alter publication supabase_realtime add table public.history;
-alter publication supabase_realtime add table public.messages;
-alter publication supabase_realtime add table public.settings;
+-- ---------- 5. realtime (safe to re-run) ----------
+do $$
+declare t text;
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    return;
+  end if;
+  foreach t in array array['companies','history','messages','settings'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
 
 -- ---------- 6. seed: the 12 tracker rows ----------
 
@@ -172,6 +183,8 @@ insert into public.companies (id,num,company,instrument,bucket,ccy,invested,cap,
 on conflict (id) do nothing;
 
 -- ---------- 7. seed: the 58 history entries ----------
+create unique index if not exists history_dedupe
+  on public.history (entry_date, coalesce(company,''), md5(entry));
 insert into public.history (entry_date, company, entry, source) values
 ('2022-06-13', 'Amanleek', 'Convertible Note signed. Note amount USD 125,000. Cap USD 3.0m, 20% discount, QEF USD 2.0m, Target Financing USD 10.0m. Counterparty Amanleek PTE. LTD. (Singapore).', 'Signed note'),
 ('2023-06-13', 'Agel', 'Convertible Note signed. USD 125,000. Cap USD 4.8m, QEF USD 1.0m, Target Financing USD 1.0m. Counterparty Agel Fintech Holding PTE. LTD.', 'Signed note'),
@@ -230,7 +243,8 @@ insert into public.history (entry_date, company, entry, source) values
 ('2026-08-30', 'Amanleek', 'Further follow-up sent pushing for an issuance timeline. No response received.', 'Email'),
 ('2026-08-30', 'Connect Money', 'BMV position set: do not join SAFE-2, move ahead with receiving a term sheet and signing the SHA.', 'BMV decision'),
 ('2026-08-30', 'Connect Money', 'Analysis of the SAFE against the cap table: the USD 15m cap read post-money gives 6.67%, an Equity Financing conversion at the 50% discount gives 6.06%, the company model gives 4.35%, and the strict pre-money reading of Company Capitalization gives 3.70%. Maturity conversion under Section 1(e) carries no discount and is the weakest route.', 'BMV analysis'),
-('2026-08-30', 'Subsbase', 'Information request sent to the founders covering scope of the liquidation, IP registration and ownership, treatment of assets and liabilities, and their proposed approach to BM''s position. Rights expressly reserved and Sections 3(c) and 3(d) cited.', 'Email');
+('2026-08-30', 'Subsbase', 'Information request sent to the founders covering scope of the liquidation, IP registration and ownership, treatment of assets and liabilities, and their proposed approach to BM''s position. Rights expressly reserved and Sections 3(c) and 3(d) cited.', 'Email')
+on conflict do nothing;
 
 -- ---------- 8. seed: legend lists, fx rate, deck figures, standing note ----------
 insert into public.settings (key, value) values
