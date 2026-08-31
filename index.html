@@ -250,7 +250,7 @@
   @media (max-width:700px){ .upd-item{ grid-template-columns:1fr; gap:2px; } }
 
   /* ---------- history ---------- */
-  .hrow{ display:grid; grid-template-columns:96px 122px 1fr 148px; gap:12px; padding:9px 4px;
+  .hrow{ display:grid; grid-template-columns:96px 122px 1fr 148px 92px; gap:12px; padding:9px 4px;
     border-bottom:1px solid var(--border); font-size:12.5px; align-items:start; }
   .hrow.head{ font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-faint);
     font-weight:700; border-bottom:2px solid var(--border-strong); position:sticky; top:0; background:var(--surface); z-index:2; }
@@ -461,7 +461,7 @@
         <span class="spacer"></span>
         <button class="btn btn-sm btn-primary" id="addHist" type="button">+ Add entry</button>
       </div>
-      <div class="hrow head"><div>Date</div><div>Company</div><div>Entry</div><div>Source</div></div>
+      <div class="hrow head"><div>Date</div><div>Company</div><div>Entry</div><div>Source</div><div></div></div>
       <div id="histList"></div>
     </div>
   </section>
@@ -531,7 +531,7 @@
 
 <div id="histModal" class="overlay" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-label="Add a history entry">
-    <div class="modal-hd"><h2>Add a history entry</h2>
+    <div class="modal-hd"><h2 id="histModalTitle">Add a history entry</h2>
       <p>A dated record of what happened, so Latest Situation can stay short.</p></div>
     <div class="modal-bd">
       <div class="eform two">
@@ -541,6 +541,7 @@
         <div class="full"><label for="hSrc">Source</label><input type="text" id="hSrc" placeholder="Email, Counsel opinion, Misr Capital memo…"></div>
       </div>
       <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" id="hDelete" type="button" hidden style="margin-right:auto;">Delete</button>
         <button class="btn" id="hCancel" type="button">Cancel</button>
         <button class="btn btn-primary" id="hSave" type="button">Add entry</button>
       </div>
@@ -598,7 +599,7 @@
   var tab="dashboard", openId=null, editing=null;
   var sortKey="num", sortDir=1;
   var filters={q:"",bucket:"all",priority:"all",trigger:"all",legal:false,attn:false};
-  var hF={company:"all",q:""}, uF={company:"all"};
+  var hF={company:"all",q:""}, uF={company:"all"}, histEditId=null;
 
   function clone(o){ return (typeof structuredClone==="function")?structuredClone(o):JSON.parse(JSON.stringify(o)); }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
@@ -792,6 +793,43 @@
     sb.from("history").insert({ entry_date:row.date, company:row.company, entry:row.entry,
       source:row.source, created_by:seat?seat.role:null }).then(function(r){
       busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+  }
+  function updateHistory(id, row){
+    if(!sb) return;
+    busy(true);
+    sb.from("history").update({ entry_date:row.date, company:row.company, entry:row.entry,
+      source:row.source }).eq("id",id).then(function(r){
+      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+  }
+  function removeHistory(id){
+    if(!sb) return;
+    busy(true);
+    sb.from("history").delete().eq("id",id).then(function(r){
+      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+  }
+  function openHistModal(opts){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    opts=opts||{};
+    histEditId=opts.id||null;
+    if(histEditId){
+      var h=state.history.filter(function(x){ return x.id===histEditId; })[0];
+      if(!h) return;
+      $("hDate").value=h.date; $("hCo").value=h.company||""; $("hEntry").value=h.entry; $("hSrc").value=h.source||"";
+      $("histModalTitle").textContent="Edit history entry";
+      $("hDelete").hidden=false; $("hSave").textContent="Save";
+    } else {
+      $("hDate").value=today(); $("hCo").value=opts.company||""; $("hEntry").value=""; $("hSrc").value="";
+      $("histModalTitle").textContent="Add a history entry";
+      $("hDelete").hidden=true; $("hSave").textContent="Add entry";
+    }
+    $("histModal").hidden=false;
+  }
+  function deleteHistEntry(id){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    var h=state.history.filter(function(x){ return x.id===id; })[0];
+    if(!h) return;
+    var head=h.entry.length>90? h.entry.slice(0,90)+"…" : h.entry;
+    askConfirm("Delete this history entry?", head, "Delete", function(){ removeHistory(id); });
   }
   function saveSetting(key, value, localFn){
     if(!sb) return;
@@ -1210,10 +1248,15 @@
 
     var hist=state.history.filter(function(h){ return h.company===c.company; })
       .sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); }).slice(0,5);
-    var histHtml=hist.length? hist.map(function(h){
+    var histHtml=(hist.length? hist.map(function(h){
       return '<div class="refrow"><div class="rk mono" style="font-size:11px;color:var(--ink-soft)">'+
-        esc(dmy(h.date))+' · '+esc(h.source||"")+'</div><div class="rv">'+esc(h.entry)+'</div></div>'; }).join("")
-      : '<div class="empty" style="padding:8px 0;">No history entries.</div>';
+        esc(dmy(h.date))+' · '+esc(h.source||"")+'</div><div class="rv">'+esc(h.entry)+'</div>'+
+        '<div class="acts" style="margin-top:5px;">'+
+        '<button class="btn btn-sm" type="button" data-act="editHist" data-hid="'+esc(h.id)+'">Edit</button>'+
+        '<button class="btn btn-sm" type="button" data-act="delHist" data-hid="'+esc(h.id)+'">Delete</button>'+
+        '</div></div>'; }).join("")
+      : '<div class="empty" style="padding:8px 0;">No history entries.</div>')+
+      '<div class="acts"><button class="btn btn-sm" type="button" data-act="addHistC">+ Add entry</button></div>';
 
     return '<tr class="detail"><td colspan="19"><div class="dwrap" data-id="'+esc(c.id)+'">'+
       '<div class="dcol"><h4>Latest situation</h4>'+col1+'<h4>Updates</h4>'+thread+'</div>'+
@@ -1263,8 +1306,12 @@
     w.addEventListener("click",function(e){
       var b=e.target.closest("[data-act]"); if(!b) return;
       e.stopPropagation();
-      if(b.getAttribute("data-act")==="delMsg"){ deleteMsg(b.getAttribute("data-mid")); return; }
-      act(b.getAttribute("data-act"),c,w);
+      var ba=b.getAttribute("data-act");
+      if(ba==="delMsg"){ deleteMsg(b.getAttribute("data-mid")); return; }
+      if(ba==="editHist"){ openHistModal({id:b.getAttribute("data-hid")}); return; }
+      if(ba==="delHist"){ deleteHistEntry(b.getAttribute("data-hid")); return; }
+      if(ba==="addHistC"){ openHistModal({company:c.company}); return; }
+      act(ba,c,w);
     });
     Array.prototype.forEach.call(w.querySelectorAll("input,select,textarea"),function(el){
       el.addEventListener("click",function(e){ e.stopPropagation(); });
@@ -1373,8 +1420,20 @@
     }).sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
     $("histList").innerHTML=rows.length? rows.map(function(h){
       return '<div class="hrow"><div class="hdate">'+esc(dmy(h.date))+'</div><div class="hco">'+esc(h.company||"")+
-        '</div><div>'+esc(h.entry)+'</div><div class="hsrc">'+esc(h.source||"")+'</div></div>'; }).join("")
+        '</div><div>'+esc(h.entry)+'</div><div class="hsrc">'+esc(h.source||"")+'</div>'+
+        '<div class="acts" style="margin-top:0;">'+
+        '<button class="btn btn-sm" type="button" data-act="editHist" data-hid="'+esc(h.id)+'">Edit</button>'+
+        '<button class="btn btn-sm" type="button" data-act="delHist" data-hid="'+esc(h.id)+'">Delete</button>'+
+        '</div></div>'; }).join("")
       : '<div class="empty">No entries match.</div>';
+    Array.prototype.forEach.call($("histList").querySelectorAll("[data-act]"), function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        var a=b.getAttribute("data-act");
+        if(a==="editHist") openHistModal({id:b.getAttribute("data-hid")});
+        if(a==="delHist") deleteHistEntry(b.getAttribute("data-hid"));
+      });
+    });
   }
 
   /* ---------- legend ---------- */
@@ -1512,13 +1571,22 @@
     $("hq").addEventListener("input",function(e){ hF.q=e.target.value; renderHistory(); });
     $("addHist").addEventListener("click",function(){
       if(readOnly){ toast("Read only view.","warn"); return; }
-      $("hDate").value=today(); $("hEntry").value=""; $("hSrc").value=""; $("histModal").hidden=false; });
-    $("hCancel").addEventListener("click",function(){ $("histModal").hidden=true; });
+      openHistModal();
+    });
+    $("hCancel").addEventListener("click",function(){ $("histModal").hidden=true; histEditId=null; });
     $("hSave").addEventListener("click",function(){
       var d=$("hDate").value, co=$("hCo").value, e=$("hEntry").value.trim(), s=$("hSrc").value.trim();
       if(!d||!e){ toast("A date and an entry are required.","warn"); return; }
       $("histModal").hidden=true;
-      addHistory({date:d, company:co, entry:e, source:s||"Manual entry"});
+      if(histEditId) updateHistory(histEditId, {date:d, company:co, entry:e, source:s||"Manual entry"});
+      else addHistory({date:d, company:co, entry:e, source:s||"Manual entry"});
+      histEditId=null;
+    });
+    $("hDelete").addEventListener("click",function(){
+      if(!histEditId) return;
+      var id=histEditId;
+      $("histModal").hidden=true; histEditId=null;
+      deleteHistEntry(id);
     });
 
     $("fxSave").addEventListener("click",function(){
