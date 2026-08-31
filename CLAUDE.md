@@ -104,6 +104,22 @@ colour only inside a media query. The two logos are base64 data URIs.
   back everything, including the seed.
 - `alter publication supabase_realtime add table` errors if the table is already a
   member. The script guards this; keep the guard.
-- CSV export writes a UTF-8 BOM so Excel renders the bullet characters correctly.
+- The Excel export writes the `.xlsx` by hand (`buildXlsx`): an xlsx is a ZIP of
+  XML parts, and entries are stored **uncompressed**, so it needs only a CRC32
+  and no library. SheetJS was not used because its free build cannot write cell
+  styling at all, and the point of the export is the formatting. Two rules the
+  file format is unforgiving about: the child elements of `<worksheet>` must
+  appear in schema order (`sheetViews`, `sheetFormatPr`, `cols`, `sheetData`,
+  `autoFilter`, `mergeCells`, `pageSetup`), and a single control character in
+  any cell makes Excel reject the whole workbook — `xesc()` strips them.
+- The export's columns, widths and group bands deliberately mirror
+  `Portfolio_Dashboard_v4.xlsx` — verified by diffing a generated file against it.
+  Two deliberate departures: bands use the app's maroon identity rather than the
+  workbook's navy (with LEGAL a bright red, `#C00000`, so it stands out), and the
+  subtitle omits the workbook's "Confidential — Internal", per the domain rule
+  above.
+- Dates are written as Excel serials (`xlDate`, days since 1899-12-30). Invested
+  and Cap use `#,##0` and **not** the workbook's `$#,##0`, because the tracker
+  holds EGP positions too and the currency lives in its own `Ccy` column.
 - The row detail panel gets its width set in JavaScript (`fitDetail`) because the
   table is wider than the viewport and the panel lives in a sticky cell.
