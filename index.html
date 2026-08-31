@@ -1426,7 +1426,8 @@
     $("asOf").textContent="As of "+state.meta.asOf;
     $("seatRole").textContent=seat?seat.role:"—";
     var m=state.meta;
-    $("lastEdit").textContent=m.lastUpdatedAt? "Last edit "+when(m.lastUpdatedAt)+" by "+m.lastUpdatedRole : "";
+    $("lastEdit").textContent=m.lastUpdatedAt
+      ? ("Last edit "+when(m.lastUpdatedAt)+(m.lastUpdatedRole? " by "+m.lastUpdatedRole : "")) : "";
     fillSelect("fBucket",state.lists.bucket,"All buckets");
     fillSelect("fPriority",state.lists.priority,"All priorities");
     fillSelect("fTrigger",state.lists.triggerStatus,"All trigger statuses");
