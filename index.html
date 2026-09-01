@@ -215,6 +215,9 @@
   .kv .k{ color:var(--ink-soft); } .kv .v{ font-family:"IBM Plex Mono",monospace; text-align:right; }
   .basis{ font-size:12px; color:var(--ink-soft); background:var(--surface); border:1px solid var(--border);
     border-radius:7px; padding:9px 11px; margin-top:7px; }
+  .matwarn{ font-size:12px; font-weight:600; color:var(--crit); background:var(--crit-bg);
+    border-radius:7px; padding:7px 10px; margin:6px 0 2px; }
+  .hint-inline{ font-size:10.5px; font-weight:400; color:var(--ink-faint); font-family:Archivo,sans-serif; }
   .acts{ display:flex; gap:7px; margin-top:10px; flex-wrap:wrap; }
   .eform{ display:grid; gap:9px; margin-top:8px; }
   .eform.two{ grid-template-columns:1fr 1fr; }
@@ -403,7 +406,7 @@
         <input type="search" id="q" placeholder="Search company, situation, action…  ( / )">
         <select id="fBucket"></select>
         <select id="fPriority"></select>
-        <select id="fTrigger"></select>
+        <select id="fStatus"></select>
         <button class="chip" id="cLegal" type="button">Awaiting legal</button>
         <button class="chip" id="cAttn" type="button">Needs attention</button>
         <button class="btn btn-sm" id="clearF" type="button" hidden>Clear filters</button>
@@ -579,8 +582,8 @@
     {k:"cap",        t:"Cap",            cls:"num hide-sm", sortable:true},
     {k:"discount",   t:"Disc.",          cls:"num hide-sm", sortable:true},
     {k:"maturityDate",t:"Maturity",      cls:"hide-sm",     sortable:true},
-    {k:"extension",  t:"Extension",      cls:"hide-sm",     sortable:true},
-    {k:"triggerStatus",t:"Trigger",      cls:"",            sortable:true},
+    {k:"nextTrigger",t:"Converts on",    cls:"hide-sm",     sortable:true},
+    {k:"status",     t:"Status",         cls:"",            sortable:true},
     {k:"issueType",  t:"Issue",          cls:"hide-sm",     sortable:true},
     {k:"priority",   t:"Priority",       cls:"",            sortable:true},
     {k:"owner",      t:"Owner",          cls:"hide-sm",     sortable:true},
@@ -592,13 +595,13 @@
   ];
 
   var state={ meta:{fx:50,asOf:"",lastUpdatedAt:"",lastUpdatedRole:""}, companies:[], history:[],
-              messages:[], lists:{priority:[],issueType:[],bucket:[],trigger:[],triggerStatus:[],
-              extension:[],track:[],yesNo:[]}, triggerMap:[], reading:[], sources:"", dashNote:"",
+              messages:[], lists:{priority:[],issueType:[],bucket:[],trigger:[],status:[],
+              track:[],yesNo:[]}, triggerMap:[], reading:[], sources:"", dashNote:"",
               investments:null, activity:[] };
   var seat=null, session=null, profile=null, readOnly=false;
   var tab="dashboard", openId=null, editing=null;
   var sortKey="num", sortDir=1;
-  var filters={q:"",bucket:"all",priority:"all",trigger:"all",legal:false,attn:false};
+  var filters={q:"",bucket:"all",priority:"all",status:"all",legal:false,attn:false};
   var hF={company:"all",q:""}, uF={company:"all"}, histEditId=null;
 
   function clone(o){ return (typeof structuredClone==="function")?structuredClone(o):JSON.parse(JSON.stringify(o)); }
@@ -635,16 +638,32 @@
     if(d<=7) return '<span class="duetag soon">'+d+'d</span>';
     return "";
   }
+  /* The date that actually governs. An extension only counts once it is
+     countersigned, which is what extendedTo records; an unsigned notice leaves
+     the original maturity standing (CLN cl. 14.1 — no variation is effective
+     unless signed by each party). */
+  function effMaturity(c){ return c.extendedTo || c.maturityDate; }
+  /* Past maturity is computed, never typed, so a lapsed note cannot sit here
+     looking green because nobody remembered to change a dropdown. */
   function maturityAlert(c){
-    var d=parseLoose(c.maturityDate); if(!d) return null;
+    var d=parseLoose(effMaturity(c)); if(!d) return null;
     var days=daysFromToday(d);
     if(days>=0) return null;
-    if(c.extension==="Not extended" || c.extension==="Matured - no extension mechanism"){
-      var months=Math.floor(Math.abs(days)/30.44);
-      return months>=1 ? months+(months===1?" month":" months")+" past maturity, "+(c.extension==="Not extended"?"not extended":"no extension mechanism")
-                       : Math.abs(days)+" days past maturity";
-    }
-    return null;
+    var months=Math.floor(Math.abs(days)/30.44);
+    var age=months>=1 ? months+(months===1?" month":" months")+" past maturity"
+                      : Math.abs(days)+" days past maturity";
+    return c.extendedTo ? age+" (extended to "+dmy(c.extendedTo)+")" : age+", no signed extension";
+  }
+  /* Compact form for the table cell: "15mo late". */
+  function overdueShort(c){
+    var d=daysFromToday(parseLoose(effMaturity(c))); if(d===null||d>=0) return "";
+    var months=Math.floor(Math.abs(d)/30.44);
+    return months>=1 ? months+"mo late" : Math.abs(d)+"d late";
+  }
+  function maturitySoon(c){
+    if(maturityAlert(c)) return false;
+    var d=daysFromToday(parseLoose(effMaturity(c)));
+    return d!==null && d<=90;
   }
   function needsAttention(c){
     if(c.priority==="Immediate") return true;
@@ -671,12 +690,11 @@
   function pctv(v){ return (v===""||v==null)?"—":Math.round(Number(v)*100)+"%"; }
 
   function priCls(p){ return p==="Immediate"?"p-crit":p==="Near-Term"?"p-warn":p==="Postponed"?"p-calm":"p-ok"; }
-  function trigCls(t){ return (t==="Passed"||t==="Disputed")?"p-crit":t==="Live now"?"p-warn":
-    t==="Extended"?"p-ok":t==="Watching"?"p-calm":"p-mute"; }
+  function statusCls(s){ return s==="Disputed"?"p-crit":
+    (s==="Waiting on company"||s==="Decision due")?"p-warn":
+    s==="In progress"?"p-calm":s==="On track"?"p-ok":"p-mute"; }
   function buckCls(b){ return b==="Growing"?"p-ok":b==="Stable"?"p-calm":b==="Watchlist"?"p-warn":
     b==="Pivoting"?"p-mute":"p-crit"; }
-  function extCls(e){ return (e==="Not extended"||e==="Matured - no extension mechanism")?"p-crit":
-    e==="Under decision"?"p-warn":e==="Extended"?"p-ok":"p-mute"; }
 
   /* ---------- toast / save ---------- */
   var cfCb=null;
@@ -697,8 +715,8 @@
   /* ---------- Supabase IO ---------- */
   var CO_COLS={ id:"id", num:"num", company:"company", instrument:"instrument", bucket:"bucket",
     ccy:"ccy", invested:"invested", cap:"cap", discount:"discount", paymentDate:"payment_date",
-    maturityDate:"maturity_date", extension:"extension", nextTrigger:"next_trigger",
-    triggerBasis:"trigger_basis", triggerStatus:"trigger_status", issueType:"issue_type",
+    maturityDate:"maturity_date", extendedTo:"extended_to", nextTrigger:"next_trigger",
+    triggerBasis:"trigger_basis", status:"status", issueType:"issue_type",
     priority:"priority", situation:"situation", nextAction:"next_action", owner:"owner",
     due:"due", legalNext:"legal_next", legalReq:"legal_req", targetFeedback:"target_feedback",
     vcTrack:"vc_track", vcPlan:"vc_plan", lastUpdated:"last_updated", legalRaisedAt:"legal_raised_at" };
@@ -930,7 +948,7 @@
     return { items:co.length,
       immediate:co.filter(function(c){return c.priority==="Immediate";}).length,
       legal:co.filter(function(c){return c.legalNext==="YES";}).length,
-      notExt:co.filter(function(c){return c.extension==="Not extended";}).length,
+      overdue:co.filter(function(c){return !!maturityAlert(c);}).length,
       inv:inv };
   }
   function countBy(f,vals){ return vals.map(function(v){
@@ -1039,12 +1057,13 @@
       tile("Portfolio items", String(k.items), "tracked in this ledger","")+
       tile("Immediate action", String(k.immediate), "act this cycle", k.immediate?"crit":"")+
       tile("Awaiting legal", String(k.legal), "counsel is the blocking item", k.legal?"warn":"")+
-      tile("Notes not extended", String(k.notExt), k.notExt?"past maturity, unextended":"all notes covered", k.notExt?"crit":"")+
+      tile("Past maturity", String(k.overdue), k.overdue?"no signed extension in place":"every note within term", k.overdue?"crit":"")+
       tile("Total investment", egpMn(t5.totalEgp), "unpaid "+egpMn(t5.unpaid)+" · "+t5.companies+" companies","");
     $("brkPriority").innerHTML=bars(countBy("priority",state.lists.priority),function(l){
       return l==="Immediate"?"crit":l==="Near-Term"?"warn":l==="Postponed"?"":"ok"; });
-    $("brkTrigger").innerHTML=bars(countBy("triggerStatus",state.lists.triggerStatus),function(l){
-      return (l==="Passed"||l==="Disputed")?"crit":l==="Live now"?"warn":l==="Extended"?"ok":"mute"; });
+    $("brkTrigger").innerHTML=bars(countBy("status",state.lists.status),function(l){
+      return l==="Disputed"?"crit":(l==="Waiting on company"||l==="Decision due")?"warn":
+        l==="On track"?"ok":"mute"; });
     $("brkTrack").innerHTML=bars(countBy("vcTrack",state.lists.track),function(l){
       return l==="None currently"?"mute":""; });
 
@@ -1088,7 +1107,7 @@
     var rows=state.companies.filter(function(c){
       if(filters.bucket!=="all"&&c.bucket!==filters.bucket) return false;
       if(filters.priority!=="all"&&c.priority!==filters.priority) return false;
-      if(filters.trigger!=="all"&&c.triggerStatus!==filters.trigger) return false;
+      if(filters.status!=="all"&&c.status!==filters.status) return false;
       if(filters.legal&&c.legalNext!=="YES") return false;
       if(filters.attn&&!needsAttention(c)) return false;
       if(q){
@@ -1105,7 +1124,7 @@
     return rows;
   }
   function anyFilter(){
-    return filters.q||filters.bucket!=="all"||filters.priority!=="all"||filters.trigger!=="all"||
+    return filters.q||filters.bucket!=="all"||filters.priority!=="all"||filters.status!=="all"||
            filters.legal||filters.attn;
   }
   function renderHead(){
@@ -1139,10 +1158,11 @@
         '<td class="num mono hide-sm">'+money(c.invested)+'</td>'+
         '<td class="num mono hide-sm">'+money(c.cap)+'</td>'+
         '<td class="num mono hide-sm">'+pctv(c.discount)+'</td>'+
-        '<td class="hide-sm mono mat-cell"'+(mAlert?' title="'+esc(mAlert)+'"':'')+'>'+dmy(c.maturityDate)+
-          (mAlert?' <span class="duetag over">!</span>':'')+'</td>'+
-        '<td class="hide-sm"><span class="pill '+extCls(c.extension)+'">'+esc(c.extension||"—")+'</span></td>'+
-        '<td><span class="pill '+trigCls(c.triggerStatus)+'">'+esc(c.triggerStatus||"—")+'</span></td>'+
+        '<td class="hide-sm mono mat-cell"'+(mAlert?' title="'+esc(mAlert)+'"':'')+'>'+dmy(effMaturity(c))+
+          (mAlert?' <span class="duetag over">'+esc(overdueShort(c))+'</span>'
+                 :(maturitySoon(c)?' <span class="duetag soon">soon</span>':''))+'</td>'+
+        '<td class="hide-sm">'+esc(c.nextTrigger||"—")+'</td>'+
+        '<td><span class="pill '+statusCls(c.status)+'">'+esc(c.status||"—")+'</span></td>'+
         '<td class="hide-sm issue-cell">'+esc(c.issueType)+'</td>'+
         '<td><span class="pill '+priCls(c.priority)+'">'+esc(c.priority)+'</span></td>'+
         '<td class="hide-sm">'+esc(c.owner)+'</td>'+
@@ -1194,9 +1214,10 @@
       '<div><label>Discount (0.2 = 20%)</label><input data-f="discount" value="'+esc(c.discount)+'"></div>'+
       '<div><label>Payment date</label><input data-f="paymentDate" value="'+esc(c.paymentDate)+'" placeholder="YYYY-MM-DD"></div>'+
       '<div><label>Maturity date</label><input data-f="maturityDate" value="'+esc(c.maturityDate)+'" placeholder="YYYY-MM-DD"></div>'+
-      '<div><label>Extension status</label>'+sel("extension",state.lists.extension,c.extension)+'</div>'+
-      '<div><label>Trigger status</label>'+sel("triggerStatus",state.lists.triggerStatus,c.triggerStatus)+'</div>'+
-      '<div class="full"><label>Next trigger</label>'+sel("nextTrigger",state.lists.trigger,c.nextTrigger)+'</div>'+
+      '<div><label>Extended to <span class="hint-inline">only if countersigned</span></label>'+
+        '<input data-f="extendedTo" value="'+esc(c.extendedTo)+'" placeholder="YYYY-MM-DD"></div>'+
+      '<div><label>Status</label>'+sel("status",state.lists.status,c.status)+'</div>'+
+      '<div><label>Converts on</label>'+sel("nextTrigger",state.lists.trigger,c.nextTrigger)+'</div>'+
       '<div class="full"><label>Trigger basis / threshold</label><textarea data-f="triggerBasis">'+esc(c.triggerBasis)+'</textarea></div>'+
       '</div><div class="acts"><button class="btn btn-primary btn-sm" data-act="saveP">Save</button>'+
       '<button class="btn btn-sm" data-act="cancel">Cancel</button></div>'
@@ -1207,9 +1228,12 @@
       '<div class="kv"><span class="k">Valuation cap</span><span class="v">'+esc(c.ccy)+" "+money(c.cap)+'</span></div>'+
       '<div class="kv"><span class="k">Discount</span><span class="v">'+pctv(c.discount)+'</span></div>'+
       '<div class="kv"><span class="k">Paid</span><span class="v">'+dmy(c.paymentDate)+'</span></div>'+
-      '<div class="kv"><span class="k">Maturity</span><span class="v">'+dmy(c.maturityDate)+'</span></div>'+
-      '<div class="kv"><span class="k">Extension</span><span class="v">'+esc(c.extension||"—")+'</span></div>'+
-      '<h4>Next trigger</h4><div style="font-size:12.5px;font-weight:700;">'+esc(c.nextTrigger||"—")+'</div>'+
+      '<div class="kv"><span class="k">Maturity</span><span class="v">'+dmy(effMaturity(c))+
+        (c.extendedTo?' <span class="hint-inline">extended</span>':'')+'</span></div>'+
+      (maturityAlert(c)?'<div class="matwarn">'+esc(maturityAlert(c))+'</div>':'')+
+      '<div class="kv"><span class="k">Status</span><span class="v">'+
+        '<span class="pill '+statusCls(c.status)+'">'+esc(c.status||"—")+'</span></span></div>'+
+      '<h4>Converts on</h4><div style="font-size:12.5px;font-weight:700;">'+esc(c.nextTrigger||"—")+'</div>'+
       (c.triggerBasis?'<div class="basis">'+esc(c.triggerBasis)+'</div>':'')+
       '<div class="acts"><button class="btn btn-sm" data-act="editP">Edit position &amp; triggers</button></div>';
 
@@ -1359,8 +1383,8 @@
       if(fv(w,"cap")!==""&&(isNaN(cap)||cap<0)){ toast("Valuation cap must be a number.","bad"); return; }
       if(fv(w,"discount")!==""&&(isNaN(d)||d<0||d>1)){ toast("Discount is a fraction, 0.2 for 20%.","bad"); return; }
       var p={ccy:fv(w,"ccy"),invested:inv,cap:fv(w,"cap")===""?"":cap,discount:fv(w,"discount")===""?"":d,
-             paymentDate:fv(w,"paymentDate"),maturityDate:fv(w,"maturityDate"),extension:fv(w,"extension"),
-             triggerStatus:fv(w,"triggerStatus"),nextTrigger:fv(w,"nextTrigger"),triggerBasis:fv(w,"triggerBasis")};
+             paymentDate:fv(w,"paymentDate"),maturityDate:fv(w,"maturityDate"),extendedTo:fv(w,"extendedTo"),
+             status:fv(w,"status"),nextTrigger:fv(w,"nextTrigger"),triggerBasis:fv(w,"triggerBasis")};
       editing=null;
       p.lastUpdated=today();
       saveCompany(c.id, p, function(s){
@@ -1439,7 +1463,7 @@
   /* ---------- legend ---------- */
   function renderLegend(){
     var n={priority:"Priority",issueType:"Issue type",bucket:"Bucket",trigger:"Trigger",
-      triggerStatus:"Trigger status",extension:"Extension",track:"Value creation track",yesNo:"Yes / no"};
+      status:"Status",track:"Value creation track",yesNo:"Yes / no"};
     $("lgrid").innerHTML=Object.keys(n).map(function(k){
       return '<div><div class="lbl">'+esc(n[k])+'</div><ul>'+state.lists[k].map(function(v){
         return '<li>'+esc(v)+'</li>'; }).join("")+'</ul></div>'; }).join("");
@@ -1662,8 +1686,8 @@
     {k:"ccy",h:"Ccy",w:6},{k:"invested",h:"Invested",w:12,t:"n"},
     {k:"cap",h:"Valuation Cap",w:13,t:"n"},{k:"discount",h:"Discount",w:9,t:"p"},
     {k:"paymentDate",h:"Payment Date",w:12,t:"d"},{k:"maturityDate",h:"Maturity Date",w:12,t:"d"},
-    {k:"extension",h:"Extension Status",w:14},{k:"nextTrigger",h:"Next Trigger",w:21},
-    {k:"triggerBasis",h:"Trigger Basis / Threshold",w:30},{k:"triggerStatus",h:"Trigger Status",w:12},
+    {k:"extendedTo",h:"Extended To",w:13,t:"d"},{k:"nextTrigger",h:"Converts On",w:17},
+    {k:"triggerBasis",h:"Trigger Basis / Threshold",w:30},{k:"status",h:"Status",w:17},
     {k:"issueType",h:"Issue Type",w:15},{k:"priority",h:"Priority",w:13},
     {k:"situation",h:"Latest Situation",w:56},{k:"nextAction",h:"Next Action",w:46},
     {k:"owner",h:"Owner",w:9},{k:"due",h:"Due / Next Review",w:16},
@@ -1730,7 +1754,7 @@
       ? ("Last edit "+when(m.lastUpdatedAt)+(m.lastUpdatedRole? " by "+m.lastUpdatedRole : "")) : "";
     fillSelect("fBucket",state.lists.bucket,"All buckets");
     fillSelect("fPriority",state.lists.priority,"All priorities");
-    fillSelect("fTrigger",state.lists.triggerStatus,"All trigger statuses");
+    fillSelect("fStatus",state.lists.status,"All statuses");
     var cos=state.companies.map(function(c){ return {v:c.id,t:c.company}; });
     fillSelect("uCompany",cos,"General (no company)");
     fillSelect("hCompany",state.companies.map(function(c){return c.company;}),"All companies");
@@ -1792,14 +1816,14 @@
     $("q").addEventListener("input",function(e){ filters.q=e.target.value; renderTracker(); });
     $("fBucket").addEventListener("change",function(e){ filters.bucket=e.target.value; renderTracker(); });
     $("fPriority").addEventListener("change",function(e){ filters.priority=e.target.value; renderTracker(); });
-    $("fTrigger").addEventListener("change",function(e){ filters.trigger=e.target.value; renderTracker(); });
+    $("fStatus").addEventListener("change",function(e){ filters.status=e.target.value; renderTracker(); });
     $("cLegal").addEventListener("click",function(){ filters.legal=!filters.legal;
       $("cLegal").classList.toggle("on",filters.legal); renderTracker(); });
     $("cAttn").addEventListener("click",function(){ filters.attn=!filters.attn;
       $("cAttn").classList.toggle("on",filters.attn); renderTracker(); });
     $("clearF").addEventListener("click",function(){
-      filters={q:"",bucket:"all",priority:"all",trigger:"all",legal:false,attn:false};
-      $("q").value=""; $("fBucket").value="all"; $("fPriority").value="all"; $("fTrigger").value="all";
+      filters={q:"",bucket:"all",priority:"all",status:"all",legal:false,attn:false};
+      $("q").value=""; $("fBucket").value="all"; $("fPriority").value="all"; $("fStatus").value="all";
       $("cLegal").classList.remove("on"); $("cAttn").classList.remove("on"); renderTracker();
     });
     $("printBtn").addEventListener("click",function(){ window.print(); });
