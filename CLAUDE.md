@@ -96,7 +96,6 @@ colour only inside a media query. The two logos are base64 data URIs.
    `maturity_date` to Head and Chief Venture Officer. Right now any role can edit
    them and they come from signed agreements.
 4. Optional: restrict deleting an update to the seat that posted it.
-5. Belmazad has no recorded first drawdown date, so its maturity is an assumption.
 
 ## Gotchas already paid for
 
