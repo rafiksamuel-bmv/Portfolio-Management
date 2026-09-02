@@ -215,6 +215,12 @@
   .doneitem .tick{ color:var(--ok); font-weight:700; flex:none; }
   .doneitem .when{ margin-left:auto; font-family:"IBM Plex Mono",monospace; font-size:10.5px;
     color:var(--ink-faint); flex:none; }
+  .briefcard{ display:flex; align-items:center; justify-content:space-between; gap:18px;
+    flex-wrap:wrap; margin-bottom:16px; }
+  .briefcard h3{ margin:0; }
+  .briefcard p{ margin:5px 0 0; font-size:12.5px; color:var(--ink-soft); max-width:56ch; }
+  .briefacts{ display:flex; gap:8px; flex:none; }
+  .briefacts .btn{ text-decoration:none; }
   .todo{ display:flex; flex-direction:column; gap:6px; margin-top:2px; }
   .todo-item{ display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer;
     padding:5px 7px; border-radius:7px; border:1px solid transparent; }
@@ -406,6 +412,17 @@
   <div id="roBanner" class="banner" hidden></div>
 
   <section id="view-dashboard">
+    <div class="card cardp briefcard">
+      <div>
+        <h3>Morning brief</h3>
+        <p id="briefSub">Emailed every morning at 7am Cairo. Send one now if you want it early,
+           or to check it after an update.</p>
+      </div>
+      <div class="briefacts">
+        <a class="btn btn-sm" id="briefPreview" href="#" target="_blank" rel="noopener">Preview</a>
+        <button class="btn btn-sm btn-primary" id="briefSend" type="button">Send now</button>
+      </div>
+    </div>
     <div class="kpis" id="kpis"></div>
     <div class="card cardp" style="margin-bottom:16px;">
       <h3>Investments — overview</h3>
@@ -2046,6 +2063,7 @@
     $("nHistory").textContent=String(state.history.length);
     $("nUpdates").textContent=String(state.messages.length);
     paintUndo();
+    var bc=document.querySelector(".briefcard"); if(bc) bc.hidden=readOnly;
     if(tab==="dashboard") renderDashboard();
     if(tab==="tracker") renderTracker();
     if(tab==="updates") renderUpdates();
@@ -2087,6 +2105,29 @@
         setTab(tab);
         if(seat.role==="Legal") setTimeout(function(){ openNotis(true); }, 500);
       });
+    });
+  }
+
+  /* The app is a public static page, so it cannot hold CRON_SECRET. It sends
+     the Supabase session token it already has and the endpoint verifies it. */
+  function sendBriefNow(){
+    if(!session){ toast("Sign in first.","warn"); return; }
+    askConfirm("Send the morning brief now?",
+      "It goes to the daily recipient, not just to you.", "Send", function(){
+      var b=$("briefSend"); b.disabled=true; b.textContent="Sending\u2026";
+      fetch("/api/daily-brief", { headers:{ Authorization:"Bearer "+session.access_token } })
+        .then(function(r){ return r.text().then(function(t){ return {ok:r.ok, body:t}; }); })
+        .then(function(res){
+          b.disabled=false; b.textContent="Send now";
+          if(!res.ok){ toast("Could not send: "+res.body.slice(0,150),"bad"); return; }
+          var to="";
+          try{ to=(JSON.parse(res.body)||{}).to||""; }catch(e){}
+          toast("Brief sent"+(to?" to "+to:"")+".");
+        })
+        .catch(function(e){
+          b.disabled=false; b.textContent="Send now";
+          toast("Could not send: "+e.message,"bad");
+        });
     });
   }
 
@@ -2150,6 +2191,17 @@
     $("authPass").addEventListener("keydown", function(e){ if(e.key==="Enter") signIn(); });
     $("authEmail").addEventListener("keydown", function(e){ if(e.key==="Enter") $("authPass").focus(); });
     $("undoBtn").addEventListener("click", doUndo);
+    $("briefSend").addEventListener("click", sendBriefNow);
+    $("briefPreview").addEventListener("click", function(e){
+      /* Preview needs a token too, so open it via a blob rather than a bare link. */
+      e.preventDefault();
+      if(!session){ toast("Sign in first.","warn"); return; }
+      var w=window.open("", "_blank");
+      fetch("/api/daily-brief?preview=1", { headers:{ Authorization:"Bearer "+session.access_token } })
+        .then(function(r){ return r.text(); })
+        .then(function(html){ w.document.write(html); w.document.close(); })
+        .catch(function(err){ if(w) w.close(); toast("Could not build the preview.","bad"); });
+    });
     $("signOut").addEventListener("click", function(){ if(sb) sb.auth.signOut(); });
 
     $("saveChip").addEventListener("click",function(){ loadAll().then(function(){ toast("Reloaded."); }); });

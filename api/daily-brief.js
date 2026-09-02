@@ -13,6 +13,7 @@
  *   BRIEF_TO                    recipient (defaults below)
  *   BRIEF_FROM                  verified sender
  *   PDFSHIFT_API_KEY            optional; attaches a PDF when set
+ *   SUPABASE_ANON_KEY           optional; lets a signed-in person send from the app
  *   CRON_SECRET                 set by Vercel; also accepted as ?key= for previews
  */
 
@@ -589,10 +590,19 @@ export default async function handler(req, res) {
   const preview = url.searchParams.get('preview') === '1';
 
   // Vercel cron sends the secret as a bearer token; previews may pass ?key=.
+  /* Three ways in: the cron's bearer secret, ?key= for a browser preview, or a
+     signed-in person's Supabase session, which is how the Send button in the
+     app works. The app is a public static page and cannot hold CRON_SECRET, so
+     it presents the session token it already has and the token is verified
+     against Supabase here. */
   if (CRON_SECRET) {
     const auth = req.headers.authorization || '';
-    const supplied = auth.replace(/^Bearer\s+/i, '') || url.searchParams.get('key') || '';
-    if (supplied !== CRON_SECRET) return res.status(401).send('Unauthorized');
+    const bearer = auth.replace(/^Bearer\s+/i, '');
+    const supplied = bearer || url.searchParams.get('key') || '';
+    let ok = supplied === CRON_SECRET;
+    if (!ok && bearer) ok = await isSignedIn(bearer, SUPABASE_URL,
+                                             process.env.SUPABASE_ANON_KEY || SUPABASE_SERVICE_ROLE_KEY);
+    if (!ok) return res.status(401).send('Unauthorized');
   }
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -648,6 +658,20 @@ export default async function handler(req, res) {
     sent: true, to: BRIEF_TO || DEFAULT_TO, subject: brief.subject, pdf: pdfNote,
     counts: brief.counts, overdue: brief.overdue, moved: brief.moved,
   });
+}
+
+/* Is this a real, current Supabase session? Asking Supabase rather than
+   decoding the JWT here, so an expired or revoked token is refused. */
+async function isSignedIn(token, supabaseUrl, apikey) {
+  if (!supabaseUrl || !apikey) return false;
+  try {
+    const r = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey },
+    });
+    if (!r.ok) return false;
+    const u = await r.json();
+    return !!(u && u.id);
+  } catch { return false; }
 }
 
 /* HTML to PDF via PDFShift. Swapping providers means changing this one

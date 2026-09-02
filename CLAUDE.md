@@ -83,13 +83,20 @@ output can be rendered and checked without sending anything.
   light text. Do not reintroduce light values here.
 - It needs the **service role** key, not the anon key: RLS grants only
   `authenticated`, and a cron has no session.
-- `?preview=1` returns the HTML without sending. Guarded by `CRON_SECRET`.
+- `?preview=1` returns the HTML without sending.
+- **Three ways to authorise it**: the cron's bearer `CRON_SECRET`, `?key=` for a
+  browser preview, or a **signed-in person's Supabase session token**, which is
+  how the Send now / Preview buttons on the Dashboard work. The app is a public
+  static page and cannot hold `CRON_SECRET`, so it presents the session token it
+  already has and `isSignedIn()` verifies it against `/auth/v1/user` rather than
+  decoding the JWT locally, so an expired or revoked token is refused. That path
+  needs `SUPABASE_ANON_KEY`; it falls back to the service role key if unset.
 - `middleware.ts` excludes `api/` so the cron can reach it; a scheduled request
   will never carry the browser gate cookie.
 
 Environment, all set in Vercel and never in the repo: `SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `BRIEF_TO`, `BRIEF_FROM`,
-`CRON_SECRET`.
+`CRON_SECRET`, and optionally `SUPABASE_ANON_KEY` and `PDFSHIFT_API_KEY`.
 
 ## Data model
 
