@@ -344,6 +344,22 @@ export function buildBrief({ companies, history, today }) {
     </td></tr>`;
   }
 
+  /* Parked with counsel or the company: on this person's desk, but not their
+     move today. Kept short so it cannot be confused with work to do. */
+  function waitingRow(c) {
+    const last = latestEntry(history, c);
+    const [fg, bg] = statusTone(c.status);
+    return `<tr><td style="padding:9px 0;border-top:1px solid ${C.line};">
+      <table width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="font-size:13px;font-weight:700;color:${C.mid};">${esc(c.company)}</td>
+        <td align="right">${pill(c.status || '—', fg, bg)}</td>
+      </tr></table>
+      <div style="font-size:12px;color:${C.faint};margin-top:3px;line-height:1.5;">${
+        last ? esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 150)
+             : 'Nothing logged yet.'}</div>
+    </td></tr>`;
+  }
+
   function deskBlock(desk) {
     const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
     const head = `
@@ -352,28 +368,38 @@ export function buildBrief({ companies, history, today }) {
           ${esc(desk.who)}
           <span style="font-weight:400;color:${C.faint};font-size:12.5px;">
             · ${esc(desk.role)}</span></td>
-        <td align="right">${pill(rows.length ? rows.length + (rows.length === 1 ? ' item' : ' items')
-                                              : 'clear',
-                                 rows.length ? C.maroon : C.ok,
-                                 rows.length ? C.page : C.okBg)}</td>
+        <td align="right">${(() => {
+          const act = rows.filter(c => c.status === 'Pending our action').length;
+          return act ? pill(act + ' to act', C.crit, C.critBg)
+                     : pill(rows.length ? 'waiting' : 'clear', C.ok, C.okBg);
+        })()}</td>
       </tr></table>
       <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>`;
 
-    if (!rows.length) {
-      return `<tr><td style="padding:0 28px 16px;">
-        <div style="border:1px solid ${C.line};border-radius:10px;padding:15px 18px;
-                    background:${C.soft};">${head}
-          <div style="font-size:13px;color:${C.faint};margin-top:10px;">
-            Nothing waiting on ${esc(desk.who)} today.</div>
-        </div></td></tr>`;
-    }
+
+    const mine    = rows.filter(c => c.status === 'Pending our action');
+    const waiting = rows.filter(c => c.status !== 'Pending our action');
+
+    const subhead = (text, colour) =>
+      `<tr><td style="padding:13px 0 2px;">
+         <div style="font-size:9.5px;font-family:${MONO};font-weight:700;letter-spacing:.09em;
+                     color:${colour};">${esc(text)}</div></td></tr>`;
 
     return `<tr><td style="padding:0 28px 16px;">
       <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
         <div style="background:${C.soft};padding:14px 18px;border-bottom:1px solid ${C.line};">
           ${head}</div>
-        <table width="100%" cellpadding="0" cellspacing="0"
-               style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
+        <table width="100%" cellpadding="0" cellspacing="0" style="padding:0 18px 6px;">
+          ${mine.length
+            ? subhead(`YOUR MOVE · ${mine.length}`, C.bright) + mine.map(deskItem).join('')
+            : subhead('YOUR MOVE · NONE', C.faint)
+              + `<tr><td style="padding:8px 0 2px;font-size:12.5px;color:${C.faint};">
+                   Nothing is waiting on ${esc(desk.who)} right now.</td></tr>`}
+          ${waiting.length
+            ? subhead(`WAITING ON OTHERS · ${waiting.length}`, C.faint)
+              + waiting.map(waitingRow).join('')
+            : ''}
+        </table>
       </div></td></tr>`;
   }
 
