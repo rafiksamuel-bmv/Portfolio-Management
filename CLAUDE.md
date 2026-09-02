@@ -70,6 +70,12 @@ output can be rendered and checked without sending anything.
   Mina's desk**, which a status-derived desk could not express. A company whose
   owner is blank or not one of the three appears under **Unassigned** rather
   than dropping off the brief.
+- Each desk is split in two: **Your move** is `status = 'Pending our action'`,
+  rendered in full; **Waiting on others** is everything else on that desk,
+  rendered compactly. A desk's pill counts only what the person has to act on,
+  so "3 to act" and "waiting" mean different things at a glance. Answering
+  counsel is our move, not counsel's — that is why Zammit is Pending our action
+  on Mina's desk while Connect Money, genuinely sent to Hajar, is Pending legal.
 - It needs the **service role** key, not the anon key: RLS grants only
   `authenticated`, and a cron has no session.
 - `?preview=1` returns the HTML without sending. Guarded by `CRON_SECRET`.
