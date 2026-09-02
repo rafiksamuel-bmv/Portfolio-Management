@@ -331,6 +331,11 @@
   .toasts{ position:fixed; bottom:16px; right:16px; display:flex; flex-direction:column; gap:8px; z-index:90; }
   .toast{ background:var(--ink); color:var(--page); padding:10px 16px; border-radius:8px; font-size:12.5px;
     box-shadow:var(--shadow); max-width:340px; }
+  .toast.has-undo{ display:flex; align-items:center; gap:14px; justify-content:space-between; }
+  .toast .undo{ border:1px solid rgba(255,255,255,.4); background:none; color:inherit;
+    font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:6px; cursor:pointer;
+    flex:none; letter-spacing:.03em; }
+  .toast .undo:hover{ background:rgba(255,255,255,.14); }
   .toast.warn{ background:var(--gold); color:#33260A; }
   .toast.bad{ background:var(--maroon-bright); color:#fff; }
 
@@ -731,6 +736,17 @@
   function askConfirm(title, body, yesLabel, cb){
     $("cfTitle").textContent=title; $("cfBody").textContent=body||"";
     $("cfYes").textContent=yesLabel||"Confirm"; cfCb=cb; $("confirmModal").hidden=false;
+  }
+  /* Ticking an action writes history and edits the company, so it needs a way
+     back. The toast holds the undo rather than a confirm dialog: confirming
+     every tick would make the common case tedious. */
+  function toastUndo(m, cb){
+    var e=document.createElement("div"); e.className="toast has-undo";
+    var t=document.createElement("span"); t.textContent=m;
+    var b=document.createElement("button"); b.type="button"; b.className="undo"; b.textContent="Undo";
+    var timer=setTimeout(function(){ e.remove(); }, 12000);
+    b.addEventListener("click",function(){ clearTimeout(timer); e.remove(); cb(); });
+    e.appendChild(t); e.appendChild(b); $("toasts").appendChild(e);
   }
   function toast(m,k){ var e=document.createElement("div"); e.className="toast"+(k?" "+k:"");
     e.textContent=m; $("toasts").appendChild(e); setTimeout(function(){e.remove();},4400); }
@@ -1359,13 +1375,26 @@
     if(!line) return;
     var text=line.replace(/^[\u2022\-]\s*/,"");
     var rest=lines.filter(function(_,i){ return i!==idx; }).join("\n");
-    addHistory({date:today(), company:c.company, entry:text, source:"Action completed"});
-    var patch={nextAction:rest, lastUpdated:today()};
+    var was=c.nextAction, stamp=today();
+    addHistory({date:stamp, company:c.company, entry:text, source:"Action completed"});
+    var patch={nextAction:rest, lastUpdated:stamp};
     saveCompany(c.id, patch, function(s){
       var t=s.companies.filter(function(x){ return x.id===c.id; })[0];
       Object.keys(patch).forEach(function(k){ t[k]=patch[k]; });
     });
-    toast("Logged: "+(text.length>60?text.slice(0,60)+"\u2026":text));
+    toastUndo("Logged: "+(text.length>52?text.slice(0,52)+"\u2026":text), function(){
+      /* Put the line back, and drop the history row it created. Matched on
+         company, date and text, since addHistory does not hand back an id. */
+      var h=state.history.filter(function(x){
+        return x.company===c.company && x.date===stamp && x.entry===text; })[0];
+      if(h) removeHistory(h.id);
+      var back={nextAction:was, lastUpdated:stamp};
+      saveCompany(c.id, back, function(s){
+        var t=s.companies.filter(function(x){ return x.id===c.id; })[0];
+        Object.keys(back).forEach(function(k){ t[k]=back[k]; });
+      });
+      toast("Put back on the list.");
+    });
   }
 
   function msgHtml(m){
