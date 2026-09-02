@@ -76,6 +76,11 @@ output can be rendered and checked without sending anything.
   so "3 to act" and "waiting" mean different things at a glance. Answering
   counsel is our move, not counsel's — that is why Zammit is Pending our action
   on Mina's desk while Connect Money, genuinely sent to Hajar, is Pending legal.
+- The brief is **always dark**, not "dark if the reader is". Email cannot carry
+  a media query reliably, so the palette is written as literals (the app's dark
+  theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
+  overrides to stop Outlook and Gmail inverting the ground back to white under
+  light text. Do not reintroduce light values here.
 - It needs the **service role** key, not the anon key: RLS grants only
   `authenticated`, and a cron has no session.
 - `?preview=1` returns the HTML without sending. Guarded by `CRON_SECRET`.

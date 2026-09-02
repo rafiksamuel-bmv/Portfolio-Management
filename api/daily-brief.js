@@ -32,6 +32,18 @@ const DESKS = [
     lead: 'Calls to make, and anything that needs Mr. Mohamed.' },
 ];
 
+/* A short human opening, so the brief starts like a note from a colleague
+   rather than a report header. Varies by weekday so it does not read canned. */
+function greeting(now) {
+  const day = now.getUTCDay();
+  if (day === 0) return 'Good morning. Start of the week — here is where the portfolio stands, '
+    + 'and what each of us is holding.';
+  if (day === 4) return 'Good morning. End of the week — here is where the portfolio stands, '
+    + 'and what is worth closing out before the weekend.';
+  return 'Good morning. Here is where the portfolio stands this morning, '
+    + 'and what each of us is holding today.';
+}
+
 /* ---------- dates ---------- */
 const MS_DAY = 86400000;
 function ymd(d) { return d.toISOString().slice(0, 10); }
@@ -115,13 +127,16 @@ function money(v) {
   return String(n);
 }
 
-/* ---------- palette ---------- */
+/* ---------- palette ----------
+   The brief is dark in every client, not "dark if the reader is". Values are
+   the app's own dark theme, written as literals: an email cannot carry a media
+   query reliably, so the only way to hold one look everywhere is to state it. */
 const C = {
-  maroon: '#7B1F2C', deep: '#5E1621', bright: '#A72A30', gold: '#C9A227',
-  page: '#F4F1F1', card: '#FFFFFF', line: '#E5DADB', soft: '#FBF8F8',
-  ink: '#1C1517', mid: '#5D5052', faint: '#8B7C7E',
-  crit: '#A72A30', critBg: '#F7E5E6', warn: '#8A6510', warnBg: '#F7EEDA',
-  calm: '#3F5170', calmBg: '#E6EAF1', ok: '#1D6A48', okBg: '#DFEFE7',
+  maroon: '#8E2B39', deep: '#5E1621', bright: '#D97A82', gold: '#D9B441',
+  page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
+  ink: '#EDE5E6', mid: '#B0A2A4', faint: '#867779',
+  crit: '#E88C92', critBg: '#3A1D20', warn: '#D9AE55', warnBg: '#382D14',
+  calm: '#93A6C8', calmBg: '#1F2739', ok: '#5FBE92', okBg: '#14301F',
 };
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif";
 const MONO = "'SF Mono',Menlo,Consolas,monospace";
@@ -457,23 +472,46 @@ export function buildBrief({ companies, history, today }) {
   const html =
 `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BMV Portfolio Brief</title></head>
-<body style="margin:0;padding:0;background:${C.page};font-family:${FONT};color:${C.ink};">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:${C.page};padding:22px 12px;">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>BMV Portfolio Brief</title>
+<style>
+  :root { color-scheme: dark; supported-color-schemes: dark; }
+  /* Outlook and Gmail invert colours in their own dark modes. These stop the
+     ground being flipped back to white under the light text. */
+  [data-ogsc] .ground, [data-ogsb] .ground { background: ${C.page} !important; }
+  [data-ogsc] .panel,  [data-ogsb] .panel  { background: ${C.card} !important; }
+  [data-ogsc] .ink,    [data-ogsc] .ink *  { color: ${C.ink} !important; }
+  @media (prefers-color-scheme: light) {
+    .ground { background: ${C.page} !important; }
+    .panel  { background: ${C.card} !important; }
+  }
+</style></head>
+<body class="ground" bgcolor="${C.page}"
+      style="margin:0;padding:0;background:${C.page};font-family:${FONT};color:${C.ink};">
+<table width="100%" cellpadding="0" cellspacing="0" class="ground" bgcolor="${C.page}"
+       style="background:${C.page};padding:22px 12px;">
 <tr><td align="center">
-<table width="680" cellpadding="0" cellspacing="0" style="max-width:680px;background:${C.card};
-       border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(28,21,23,.08);">
+<table width="680" cellpadding="0" cellspacing="0" class="panel ink" bgcolor="${C.card}"
+       style="max-width:680px;background:${C.card};border-radius:12px;overflow:hidden;
+              border:1px solid ${C.line};">
 
-  <tr><td style="background:${C.maroon};padding:22px 28px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
-                color:${C.gold};">BM Ventures</div>
-    <div style="font-size:22px;font-weight:700;color:#fff;margin-top:5px;">Portfolio Brief</div>
-    <div style="font-size:12.5px;color:rgba(255,255,255,.82);margin-top:3px;">
-      ${esc(longDate(now))}${lastEdited ? ` · last edited ${esc(lastEdited)}` : ''}</div>
+  <tr><td bgcolor="${C.deep}" style="background:${C.deep};padding:26px 28px 24px;
+             border-bottom:2px solid ${C.maroon};">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+                color:${C.gold};">BM Ventures &middot; Strategic Ventures</div>
+    <div style="font-size:26px;font-weight:700;color:#fff;margin-top:7px;
+                letter-spacing:-.01em;">Portfolio Brief</div>
+    <div style="font-size:13.5px;color:#fff;opacity:.9;margin-top:6px;font-weight:600;">
+      ${esc(longDate(now))}</div>
+    <div style="font-size:11.5px;font-family:${MONO};color:${C.gold};opacity:.85;margin-top:9px;">
+      Prepared by Rafik for internal review${lastEdited ? ` &middot; tracker last edited ${esc(lastEdited)}` : ''}</div>
   </td></tr>
 
-  <tr><td style="padding:22px 28px 4px;">
-    <div style="font-size:15px;line-height:1.55;color:${C.ink};font-weight:600;">${esc(topline)}</div>
+  <tr><td style="padding:24px 28px 6px;">
+    <div style="font-size:14px;line-height:1.65;color:${C.mid};">${esc(greeting(now))}</div>
+    <div style="font-size:16px;line-height:1.6;color:${C.ink};font-weight:600;
+                margin-top:10px;">${esc(topline)}</div>
   </td></tr>
 
   <tr><td style="padding:16px 28px 4px;">
