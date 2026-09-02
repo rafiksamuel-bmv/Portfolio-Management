@@ -217,6 +217,7 @@
     border-radius:7px; padding:9px 11px; margin-top:7px; }
   .matwarn{ font-size:12px; font-weight:600; color:var(--crit); background:var(--crit-bg);
     border-radius:7px; padding:7px 10px; margin:6px 0 2px; }
+  .matwarn-fix{ display:block; margin-top:7px; }
   .hint-inline{ font-size:10.5px; font-weight:400; color:var(--ink-faint); font-family:Archivo,sans-serif; }
   .acts{ display:flex; gap:7px; margin-top:10px; flex-wrap:wrap; }
   .eform{ display:grid; gap:9px; margin-top:8px; }
@@ -602,7 +603,7 @@
   var tab="dashboard", openId=null, editing=null;
   var sortKey="num", sortDir=1;
   var filters={q:"",bucket:"all",priority:"all",status:"all",legal:false,attn:false};
-  var hF={company:"all",q:""}, uF={company:"all"}, histEditId=null;
+  var hF={company:"all",q:""}, uF={company:"all"}, histEditId=null, focusField=null;
 
   function clone(o){ return (typeof structuredClone==="function")?structuredClone(o):JSON.parse(JSON.stringify(o)); }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
@@ -1230,7 +1231,9 @@
       '<div class="kv"><span class="k">Paid</span><span class="v">'+dmy(c.paymentDate)+'</span></div>'+
       '<div class="kv"><span class="k">Maturity</span><span class="v">'+dmy(effMaturity(c))+
         (c.extendedTo?' <span class="hint-inline">extended</span>':'')+'</span></div>'+
-      (maturityAlert(c)?'<div class="matwarn">'+esc(maturityAlert(c))+'</div>':'')+
+      (maturityAlert(c)?'<div class="matwarn">'+esc(maturityAlert(c))+
+        (c.extendedTo?'':'<button class="btn btn-sm matwarn-fix" type="button" data-act="recordExt">'+
+          'Record signed extension</button>')+'</div>':'')+
       '<div class="kv"><span class="k">Status</span><span class="v">'+
         '<span class="pill '+statusCls(c.status)+'">'+esc(c.status||"—")+'</span></span></div>'+
       '<h4>Converts on</h4><div style="font-size:12.5px;font-weight:700;">'+esc(c.nextTrigger||"—")+'</div>'+
@@ -1340,6 +1343,11 @@
     Array.prototype.forEach.call(w.querySelectorAll("input,select,textarea"),function(el){
       el.addEventListener("click",function(e){ e.stopPropagation(); });
     });
+    if(focusField){
+      var t=w.querySelector('[data-f="'+focusField+'"]');
+      focusField=null;
+      if(t){ t.focus(); if(t.select) t.select(); }
+    }
   }
   function fv(w,n){ var e=w.querySelector('[data-f="'+n+'"]'); return e?e.value:null; }
 
@@ -1348,6 +1356,8 @@
     if(a==="cancel"){ editing=null; renderTracker(); return; }
     if(a==="editS"){ editing=c.id+":s"; renderTracker(); return; }
     if(a==="editP"){ editing=c.id+":p"; renderTracker(); return; }
+    /* Jump straight from the past-maturity warning to the field that clears it. */
+    if(a==="recordExt"){ editing=c.id+":p"; focusField="extendedTo"; renderTracker(); return; }
     if(a==="editL"){ editing=c.id+":l"; renderTracker(); return; }
     if(a==="editV"){ editing=c.id+":v"; renderTracker(); return; }
 
