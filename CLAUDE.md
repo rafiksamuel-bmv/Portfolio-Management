@@ -36,7 +36,7 @@ Production: https://portfolio-management-five-cyan.vercel.app
 | `launch.sh` | Clears git locks and pushes |
 | `middleware.ts` | Soft link-share gate (see Architecture) |
 | `api/daily-brief.js` | Daily portfolio brief: reads Supabase, emails it. Cron'd by `vercel.json` |
-| `vercel.json` | Cron schedule for the brief (06:00 UTC daily) |
+| `vercel.json` | Cron schedule for the brief (04:00 UTC = 7am Cairo in summer) |
 | `404.html` | Shown to anyone the middleware gate blocks |
 | `package.json`, `package-lock.json` | Only exist for `middleware.ts`'s `@vercel/functions` dependency |
 
@@ -47,7 +47,14 @@ free on purpose: Supabase and Resend are both plain REST, so nothing is
 installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
-- Each company gets a timeline: its last four history entries dated, then the
+- The brief is organised by **person**, not by company: one block each for Mina,
+  Rafik and Reem, derived from `status` (Pending legal / company / our action).
+  Each company under a desk carries where it stands (newest history entry,
+  dated), what to do (the `next_action` lines), and what closing it looks like
+  (`closure`) — so nobody has to read another section to know their morning.
+- The header shows the newest `updated_at` across the tracker. There is no
+  `asOf` setting any more: it was maintained by hand and went stale.
+- Each company gets a timeline: its last three history entries dated, then the
   **NEXT** node (first bullet of `next_action` plus the due date), then the
   **CLOSE** node (`closure`). `closure` is the only field written for the brief
   rather than the app — it says what finishing the position looks like, which
@@ -78,7 +85,7 @@ JavaScript uses camelCase, Postgres uses snake_case. The mapping lives in the
 `CO_COLS` object; `rowToCo()` and `patchToRow()` translate. Add a column in three
 places: the SQL, `CO_COLS`, and wherever it renders.
 
-`settings` keys: `lists`, `fx`, `asOf`, `dashNote`, `sources`, `reading`,
+`settings` keys: `lists`, `fx`, `dashNote`, `sources`, `reading`,
 `triggerMap`, `investments`.
 
 ## Code conventions

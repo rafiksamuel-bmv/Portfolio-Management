@@ -377,7 +377,6 @@
     <h1>Portfolio Management <span class="thin">Dashboard</span></h1>
     <div class="meta">
       <span>Legal, Investment &amp; Value Creation</span><span>·</span>
-      <span id="asOf"></span><span>·</span>
       <span id="lastEdit"></span>
     </div>
     <div class="tabs" id="tabs">
@@ -1850,7 +1849,7 @@
     var blob=buildXlsx([
       {name:"Portfolio Tracker", first:2, xSplit:5, cols:XL_TRACKER_COLS,
        bands:XL_TRACKER_BANDS, rows:rows, title:"Portfolio Tracker",
-       sub:"Legal, Investment & Value Creation  |  As of "+state.meta.asOf+"  |  "+
+       sub:"Legal, Investment & Value Creation  |  "+
          rows.length+" portfolio item"+(rows.length===1?"":"s")+
          (rows.length!==state.companies.length?" (filtered from "+state.companies.length+")":"")+
          "  |  Exported "+dmy(today())},
@@ -1888,7 +1887,6 @@
     if(cur) el.value=cur;
   }
   function render(){
-    $("asOf").textContent="As of "+state.meta.asOf;
     $("seatRole").textContent=seat?seat.role:"—";
     var m=state.meta;
     $("lastEdit").textContent=m.lastUpdatedAt
