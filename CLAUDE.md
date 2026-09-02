@@ -91,7 +91,11 @@ places: the SQL, `CO_COLS`, and wherever it renders.
 ## Code conventions
 
 - **Latest Situation is not stored. It is the newest `history` entry for that
-  company**, resolved by `latestSituation()`. There is no `situation` column and
+  company**, resolved by `latestSituation()`, which **skips entries sourced
+  `Action completed`**. Ticking a next action logs one of those, prefixed
+  `Completed:`, and it renders as a green check beneath the situation rather
+  than replacing it: finishing a task is not the same as the position having
+  changed. `latestHistory(c, true)` includes them where the full log is wanted. There is no `situation` column and
   nothing should reintroduce one: the two used to hold the same events in two
   places and had already drifted apart. The situation box in "Edit status &
   action" writes a history row rather than a column, so updating the situation
