@@ -12,6 +12,7 @@
  *   RESEND_API_KEY              sending key
  *   BRIEF_TO                    recipient (defaults below)
  *   BRIEF_FROM                  verified sender
+ *   PDFSHIFT_API_KEY            optional; attaches a PDF when set
  *   CRON_SECRET                 set by Vercel; also accepted as ?key= for previews
  */
 
@@ -123,81 +124,77 @@ function pill(text, fg, bg) {
 }
 
 /* ---------- per-company timeline ----------
-   What happened, dated; then the one thing due next; then what closing this
-   position actually looks like. Built as a table so it survives Outlook. */
+   Horizontal: each milestone is a column, its top border forming the track.
+   Segmented borders rather than one absolute-positioned line, because email
+   clients do not honour negative margins or absolute positioning. */
 function timeline(c, history, now) {
-  const past = historyFor(history, c).slice(0, 4).reverse();   // oldest first
+  const past = historyFor(history, c).slice(0, 3).reverse();   // oldest first
   const [fg, bg] = statusTone(c.status);
   const od = overdueLabel(now, c);
   const dueIn = daysFrom(now, c.due);
   const actions = toLines(c.next_action);
   const closure = toLines(c.closure);
+  const hot = dueIn !== null && dueIn <= 7;
 
-  const node = (dot, dotColor, label, labelColor, body, opts = {}) =>
-    `<tr>
-       <td width="18" valign="top" style="padding:0 10px 0 0;">
-         <div style="width:9px;height:9px;border-radius:9px;background:${dotColor};
-                     margin:5px 0 0 4px;${opts.hollow ? `background:${C.card};border:2px solid ${dotColor};` : ''}"></div>
-         ${opts.last ? '' : `<div style="width:2px;height:100%;min-height:16px;background:${C.line};
-                             margin:3px 0 0 7px;"></div>`}
-       </td>
-       <td valign="top" style="padding:0 0 ${opts.last ? '2px' : '13px'};">
-         <div style="font-size:10.5px;font-family:${MONO};color:${labelColor};
-                     font-weight:${opts.strong ? '700' : '400'};letter-spacing:.02em;">${label}</div>
-         <div style="font-size:12.5px;color:${C.mid};margin-top:2px;line-height:1.5;">${body}</div>
-       </td>
-     </tr>`;
+  const nodes = past.map(h => ({
+    label: dmy(h.entry_date),
+    sub: h.source || '',
+    body: String(h.entry).split('\n')[0].replace(/^[•\-]\s*/, ''),
+    color: C.faint, track: C.line, strong: false,
+  }));
 
-  const nodes = [];
-  past.forEach(h => nodes.push(node('', C.line,
-    `${esc(dmy(h.entry_date))}${h.source ? ' · ' + esc(h.source) : ''}`, C.faint,
-    esc(String(h.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 300))));
+  nodes.push({
+    label: 'NEXT',
+    sub: c.due ? (hot ? `${c.due} · ${dueIn < 0 ? Math.abs(dueIn) + 'd late' : dueIn === 0 ? 'today' : 'in ' + dueIn + 'd'}`
+                      : c.due) : 'no date set',
+    body: actions.length ? actions[0] : 'No next action recorded.',
+    extra: actions.length > 1 ? `+${actions.length - 1} more` : '',
+    color: hot ? C.crit : C.warn, track: hot ? C.crit : C.gold, strong: true,
+  });
 
-  if (!past.length) nodes.push(node('', C.line, 'No history logged', C.faint,
-    `<span style="color:${C.faint};">Nothing recorded for this company yet.</span>`));
+  nodes.push({
+    label: 'CLOSE',
+    sub: 'what done looks like',
+    body: closure.length ? closure.join(' ') : 'Not defined yet.',
+    color: closure.length ? C.ok : C.faint,
+    track: closure.length ? C.ok : C.line,
+    strong: true, muted: !closure.length,
+  });
 
-  // the upcoming action
-  const dueLabel = c.due
-    ? `NEXT · due ${esc(c.due)}${dueIn !== null && dueIn <= 7
-        ? ` · ${dueIn < 0 ? Math.abs(dueIn) + ' days late' : dueIn === 0 ? 'today' : 'in ' + dueIn + ' days'}` : ''}`
-    : 'NEXT';
-  nodes.push(node('', dueIn !== null && dueIn <= 7 ? C.crit : C.gold,
-    dueLabel, dueIn !== null && dueIn <= 7 ? C.crit : C.warn,
-    actions.length
-      ? `<b style="color:${C.ink};">${esc(actions[0])}</b>`
-        + (actions.length > 1
-            ? `<div style="margin-top:4px;color:${C.faint};font-size:12px;">then ${
-                actions.slice(1).map(a => esc(a)).join(' · ')}</div>` : '')
-      : `<span style="color:${C.faint};">No next action recorded.</span>`,
-    { strong: true }));
+  const w = Math.floor(100 / nodes.length);
+  const cells = nodes.map((n, i) => `
+    <td width="${w}%" valign="top" style="padding:0 ${i === nodes.length - 1 ? 0 : 8}px 0 0;">
+      <div style="font-size:10px;font-family:${MONO};font-weight:${n.strong ? '700' : '400'};
+                  color:${n.color};letter-spacing:.04em;white-space:nowrap;
+                  overflow:hidden;text-overflow:ellipsis;">${esc(n.label)}</div>
+      <div style="font-size:9.5px;font-family:${MONO};color:${C.faint};margin:1px 0 6px;
+                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(n.sub)}</div>
+      <div style="border-top:3px solid ${n.track};padding-top:8px;">
+        <div style="font-size:11.5px;line-height:1.45;
+                    color:${n.muted ? C.faint : (n.strong ? C.ink : C.mid)};
+                    font-weight:${n.strong && !n.muted ? '600' : '400'};">${esc(n.body).slice(0, 260)}</div>
+        ${n.extra ? `<div style="font-size:10px;color:${C.faint};margin-top:3px;">${esc(n.extra)}</div>` : ''}
+      </div>
+    </td>`).join('');
 
-  // what closing looks like
-  nodes.push(node('', C.ok,
-    'CLOSE', C.ok,
-    closure.length
-      ? closure.map(l => esc(l)).join('<br>')
-      : `<span style="color:${C.faint};">No closure defined — add one in the tracker
-         so the desk knows what finishing this looks like.</span>`,
-    { hollow: true, last: true, strong: true }));
-
-  return `<tr><td style="padding:0 28px 16px;">
+  return `<tr><td style="padding:0 28px 14px;">
     <table width="100%" cellpadding="0" cellspacing="0"
            style="border:1px solid ${C.line};border-radius:10px;">
-      <tr><td style="padding:14px 16px 10px;">
+      <tr><td style="padding:13px 16px 11px;">
         <table width="100%" cellpadding="0" cellspacing="0"><tr>
           <td style="font-size:15px;font-weight:700;color:${C.ink};">${esc(c.company)}
             <span style="font-size:11px;font-weight:400;color:${C.faint};">
               · ${esc(c.bucket || '')}${c.owner ? ' · ' + esc(c.owner) : ''}</span></td>
           <td align="right">${pill(c.status || '—', fg, bg)}</td>
         </tr></table>
-        <div style="font-size:11px;font-family:${MONO};color:${C.faint};margin-top:5px;">
+        <div style="font-size:10.5px;font-family:${MONO};color:${C.faint};margin-top:4px;">
           ${esc(c.next_trigger || 'no trigger set')} ·
           ${effMaturity(c) ? 'matures ' + esc(dmy(effMaturity(c))) : 'no maturity'}
           ${od ? ` · <span style="color:${C.crit};font-weight:700;">${esc(od)}</span>` : ''}
         </div>
       </td></tr>
-      <tr><td style="padding:4px 16px 14px;">
-        <table width="100%" cellpadding="0" cellspacing="0">${nodes.join('')}</table>
+      <tr><td style="padding:2px 16px 15px;">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>${cells}</tr></table>
       </td></tr>
     </table></td></tr>`;
 }
@@ -445,6 +442,23 @@ export default async function handler(req, res) {
 
   if (!RESEND_API_KEY) return res.status(500).send('RESEND_API_KEY is not set.');
 
+  /* PDF is optional. Without a key the email still goes as HTML, which is
+     what most clients render best anyway. */
+  let attachments;
+  let pdfNote = 'not configured';
+  if (process.env.PDFSHIFT_API_KEY) {
+    try {
+      const pdf = await toPdf(brief.html, process.env.PDFSHIFT_API_KEY);
+      attachments = [{
+        filename: `portfolio-brief-${ymd(new Date())}.pdf`,
+        content: Buffer.from(pdf).toString('base64'),
+      }];
+      pdfNote = 'attached';
+    } catch (err) {
+      pdfNote = `failed: ${err.message}`;   // never block the email on the PDF
+    }
+  }
+
   const send = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
@@ -453,12 +467,28 @@ export default async function handler(req, res) {
       to: [BRIEF_TO || DEFAULT_TO],
       subject: brief.subject,
       html: brief.html,
+      ...(attachments ? { attachments } : {}),
     }),
   });
   if (!send.ok) return res.status(502).send(`Resend ${send.status}: ${await send.text()}`);
 
   return res.status(200).json({
-    sent: true, to: BRIEF_TO || DEFAULT_TO, subject: brief.subject,
+    sent: true, to: BRIEF_TO || DEFAULT_TO, subject: brief.subject, pdf: pdfNote,
     counts: brief.counts, overdue: brief.overdue, moved: brief.moved,
   });
+}
+
+/* HTML to PDF via PDFShift. Swapping providers means changing this one
+   function: everything else deals in HTML. */
+async function toPdf(html, key) {
+  const res = await fetch('https://api.pdfshift.io/v3/convert/pdf', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`api:${key}`).toString('base64'),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ source: html, landscape: false, format: 'A4', margin: '12mm' }),
+  });
+  if (!res.ok) throw new Error(`PDFShift ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.arrayBuffer();
 }

@@ -210,6 +210,12 @@
     margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid var(--blush-2); }
   .dcol h4 + h4, .dcol > * + h4{ margin-top:18px; }
   .bullets{ font-size:13px; white-space:pre-wrap; }
+  .todo{ display:flex; flex-direction:column; gap:6px; margin-top:2px; }
+  .todo-item{ display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer;
+    padding:5px 7px; border-radius:7px; border:1px solid transparent; }
+  .todo-item:hover{ background:var(--raised); border-color:var(--border); }
+  .todo-item input{ margin:2px 0 0; flex:none; accent-color:var(--maroon); cursor:pointer; }
+  .todo-item input:disabled{ cursor:default; }
   .kv{ display:flex; justify-content:space-between; gap:12px; font-size:12.5px; padding:4px 0;
     border-bottom:1px dotted var(--border-strong); }
   .kv .k{ color:var(--ink-soft); } .kv .v{ font-family:"IBM Plex Mono",monospace; text-align:right; }
@@ -1242,7 +1248,7 @@
       '<div class="bullets">'+esc(latestSituation(c)||"—")+'</div>'+
       (lastH?'<div class="sit-src">'+esc(dmy(lastH.date))+(lastH.source?' · '+esc(lastH.source):'')+
         ' · newest History entry</div>':'')+
-      '<h4>Next action</h4><div class="bullets">'+esc(c.nextAction||"—")+'</div>'+
+      '<h4>Next action</h4>'+actionList(c)+
       '<h4>Strategic closure</h4><div class="bullets">'+esc(c.closure||"—")+'</div>'+
       '<div class="kv"><span class="k">Owner</span><span class="v">'+esc(c.owner||"—")+'</span></div>'+
       '<div class="kv"><span class="k">Due / next review</span><span class="v">'+esc(c.due||"—")+dueTag(c)+'</span></div>'+
@@ -1332,6 +1338,36 @@
       '<div class="dcol"><h4>Legal</h4>'+legal+'<h4>Value creation</h4>'+value+
         '<h4>History</h4>'+histHtml+'</div></div></td></tr>';
   }
+  /* Each next-action line gets a tick box. Ticking it logs the line to
+     History, which is also what Latest Situation reads, and drops it from the
+     outstanding list -- one gesture, so a done action cannot linger. */
+  function actionLines(c){
+    return String(c.nextAction||"").split("\n")
+      .map(function(l){ return l.trim(); }).filter(Boolean);
+  }
+  function actionList(c){
+    var lines=actionLines(c);
+    if(!lines.length) return '<div class="bullets">\u2014</div>';
+    return '<div class="todo">'+lines.map(function(l,i){
+      return '<label class="todo-item"><input type="checkbox" data-done="'+i+'"'+
+        (readOnly?' disabled':'')+'><span>'+esc(l.replace(/^[\u2022\-]\s*/,""))+'</span></label>';
+    }).join("")+'</div>';
+  }
+  function completeAction(c, idx){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    var lines=actionLines(c), line=lines[idx];
+    if(!line) return;
+    var text=line.replace(/^[\u2022\-]\s*/,"");
+    var rest=lines.filter(function(_,i){ return i!==idx; }).join("\n");
+    addHistory({date:today(), company:c.company, entry:text, source:"Action completed"});
+    var patch={nextAction:rest, lastUpdated:today()};
+    saveCompany(c.id, patch, function(s){
+      var t=s.companies.filter(function(x){ return x.id===c.id; })[0];
+      Object.keys(patch).forEach(function(k){ t[k]=patch[k]; });
+    });
+    toast("Logged: "+(text.length>60?text.slice(0,60)+"\u2026":text));
+  }
+
   function msgHtml(m){
     return '<div class="msg'+(m.seat==="Legal"?" legal":"")+'" data-mid="'+esc(m.id)+'">'+
       '<div class="who">'+esc(m.seat||"—")+
@@ -1383,6 +1419,12 @@
     });
     Array.prototype.forEach.call(w.querySelectorAll("input,select,textarea"),function(el){
       el.addEventListener("click",function(e){ e.stopPropagation(); });
+    });
+    Array.prototype.forEach.call(w.querySelectorAll("[data-done]"),function(cb){
+      cb.addEventListener("change",function(e){
+        e.stopPropagation();
+        completeAction(c, Number(cb.getAttribute("data-done")));
+      });
     });
     if(focusField){
       var t=w.querySelector('[data-f="'+focusField+'"]');
