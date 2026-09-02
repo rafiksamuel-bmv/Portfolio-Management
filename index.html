@@ -210,6 +210,12 @@
     margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid var(--blush-2); }
   .dcol h4 + h4, .dcol > * + h4{ margin-top:18px; }
   .bullets{ font-size:13px; white-space:pre-wrap; }
+  .todo{ display:flex; flex-direction:column; gap:6px; margin-top:2px; }
+  .todo-item{ display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer;
+    padding:5px 7px; border-radius:7px; border:1px solid transparent; }
+  .todo-item:hover{ background:var(--raised); border-color:var(--border); }
+  .todo-item input{ margin:2px 0 0; flex:none; accent-color:var(--maroon); cursor:pointer; }
+  .todo-item input:disabled{ cursor:default; }
   .kv{ display:flex; justify-content:space-between; gap:12px; font-size:12.5px; padding:4px 0;
     border-bottom:1px dotted var(--border-strong); }
   .kv .k{ color:var(--ink-soft); } .kv .v{ font-family:"IBM Plex Mono",monospace; text-align:right; }
@@ -392,7 +398,7 @@
     </div>
     <div class="grid3">
       <div class="card cardp"><h3>Priority</h3><div id="brkPriority"></div></div>
-      <div class="card cardp"><h3>Trigger status</h3><div id="brkTrigger"></div></div>
+      <div class="card cardp"><h3>Status</h3><div id="brkTrigger"></div></div>
       <div class="card cardp"><h3>Value creation track</h3><div id="brkTrack"></div></div>
     </div>
     <div class="card cardp">
@@ -712,9 +718,11 @@
   function pctv(v){ return (v===""||v==null)?"—":Math.round(Number(v)*100)+"%"; }
 
   function priCls(p){ return p==="Immediate"?"p-crit":p==="Near-Term"?"p-warn":p==="Postponed"?"p-calm":"p-ok"; }
-  function statusCls(s){ return s==="Disputed"?"p-crit":
-    (s==="Waiting on company"||s==="Decision due")?"p-warn":
-    s==="In progress"?"p-calm":s==="On track"?"p-ok":"p-mute"; }
+  /* Status says who holds the ball, so the colours track that and leave
+     urgency to Priority: ours is the only one we can move. */
+  function statusCls(s){ return s==="Pending our action"?"p-warn":
+    s==="Pending legal"?"p-calm":s==="Pending company"?"p-mute":
+    s==="On track"?"p-ok":"p-mute"; }
   function buckCls(b){ return b==="Growing"?"p-ok":b==="Stable"?"p-calm":b==="Watchlist"?"p-warn":
     b==="Pivoting"?"p-mute":"p-crit"; }
 
@@ -741,7 +749,7 @@
     triggerBasis:"trigger_basis", status:"status", issueType:"issue_type",
     /* situation is deliberately absent: Latest Situation is derived from the
        newest History entry, never stored on the company. */
-    priority:"priority", nextAction:"next_action", owner:"owner",
+    priority:"priority", nextAction:"next_action", closure:"closure", owner:"owner",
     due:"due", legalNext:"legal_next", legalReq:"legal_req", targetFeedback:"target_feedback",
     vcTrack:"vc_track", vcPlan:"vc_plan", lastUpdated:"last_updated", legalRaisedAt:"legal_raised_at" };
 
@@ -1090,7 +1098,7 @@
     $("brkPriority").innerHTML=bars(countBy("priority",state.lists.priority),function(l){
       return l==="Immediate"?"crit":l==="Near-Term"?"warn":l==="Postponed"?"":"ok"; });
     $("brkTrigger").innerHTML=bars(countBy("status",state.lists.status),function(l){
-      return l==="Disputed"?"crit":(l==="Waiting on company"||l==="Decision due")?"warn":
+      return l==="Pending our action"?"warn":l==="Pending legal"?"":
         l==="On track"?"ok":"mute"; });
     $("brkTrack").innerHTML=bars(countBy("vcTrack",state.lists.track),function(l){
       return l==="None currently"?"mute":""; });
@@ -1230,6 +1238,9 @@
       '<div><label>Dated</label><input data-f="sitDate" value="'+esc(today())+'" placeholder="YYYY-MM-DD"></div>'+
       '<div><label>Source</label><input data-f="sitSource" value="" placeholder="Email, Counsel opinion…"></div>'+
       '<div class="full"><label>Next action</label><textarea data-f="nextAction">'+esc(c.nextAction)+'</textarea></div>'+
+      '<div class="full"><label>Strategic closure '+
+        '<span class="hint-inline">what "done" looks like for this position</span></label>'+
+        '<textarea data-f="closure" placeholder="e.g. Convert at the cap, or settle at 1x and close the file.">'+esc(c.closure)+'</textarea></div>'+
       '</div><div class="acts"><button class="btn btn-primary btn-sm" data-act="saveS">Save</button>'+
       '<button class="btn btn-sm" data-act="cancel">Cancel</button></div>'
       :
@@ -1237,7 +1248,8 @@
       '<div class="bullets">'+esc(latestSituation(c)||"—")+'</div>'+
       (lastH?'<div class="sit-src">'+esc(dmy(lastH.date))+(lastH.source?' · '+esc(lastH.source):'')+
         ' · newest History entry</div>':'')+
-      '<h4>Next action</h4><div class="bullets">'+esc(c.nextAction||"—")+'</div>'+
+      '<h4>Next action</h4>'+actionList(c)+
+      '<h4>Strategic closure</h4><div class="bullets">'+esc(c.closure||"—")+'</div>'+
       '<div class="kv"><span class="k">Owner</span><span class="v">'+esc(c.owner||"—")+'</span></div>'+
       '<div class="kv"><span class="k">Due / next review</span><span class="v">'+esc(c.due||"—")+dueTag(c)+'</span></div>'+
       '<div class="acts"><button class="btn btn-sm" data-act="editS">Edit status &amp; action</button></div>';
@@ -1326,6 +1338,36 @@
       '<div class="dcol"><h4>Legal</h4>'+legal+'<h4>Value creation</h4>'+value+
         '<h4>History</h4>'+histHtml+'</div></div></td></tr>';
   }
+  /* Each next-action line gets a tick box. Ticking it logs the line to
+     History, which is also what Latest Situation reads, and drops it from the
+     outstanding list -- one gesture, so a done action cannot linger. */
+  function actionLines(c){
+    return String(c.nextAction||"").split("\n")
+      .map(function(l){ return l.trim(); }).filter(Boolean);
+  }
+  function actionList(c){
+    var lines=actionLines(c);
+    if(!lines.length) return '<div class="bullets">\u2014</div>';
+    return '<div class="todo">'+lines.map(function(l,i){
+      return '<label class="todo-item"><input type="checkbox" data-done="'+i+'"'+
+        (readOnly?' disabled':'')+'><span>'+esc(l.replace(/^[\u2022\-]\s*/,""))+'</span></label>';
+    }).join("")+'</div>';
+  }
+  function completeAction(c, idx){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    var lines=actionLines(c), line=lines[idx];
+    if(!line) return;
+    var text=line.replace(/^[\u2022\-]\s*/,"");
+    var rest=lines.filter(function(_,i){ return i!==idx; }).join("\n");
+    addHistory({date:today(), company:c.company, entry:text, source:"Action completed"});
+    var patch={nextAction:rest, lastUpdated:today()};
+    saveCompany(c.id, patch, function(s){
+      var t=s.companies.filter(function(x){ return x.id===c.id; })[0];
+      Object.keys(patch).forEach(function(k){ t[k]=patch[k]; });
+    });
+    toast("Logged: "+(text.length>60?text.slice(0,60)+"\u2026":text));
+  }
+
   function msgHtml(m){
     return '<div class="msg'+(m.seat==="Legal"?" legal":"")+'" data-mid="'+esc(m.id)+'">'+
       '<div class="who">'+esc(m.seat||"—")+
@@ -1378,6 +1420,12 @@
     Array.prototype.forEach.call(w.querySelectorAll("input,select,textarea"),function(el){
       el.addEventListener("click",function(e){ e.stopPropagation(); });
     });
+    Array.prototype.forEach.call(w.querySelectorAll("[data-done]"),function(cb){
+      cb.addEventListener("change",function(e){
+        e.stopPropagation();
+        completeAction(c, Number(cb.getAttribute("data-done")));
+      });
+    });
     if(focusField){
       var t=w.querySelector('[data-f="'+focusField+'"]');
       focusField=null;
@@ -1418,7 +1466,7 @@
       var sitDate=(fv(w,"sitDate")||"").trim()||today();
       if(sit && !isYmd(sitDate)){ toast("The situation update date must look like 2026-09-02.","bad"); return; }
       var v={issueType:fv(w,"issueType"),priority:fv(w,"priority"),bucket:fv(w,"bucket"),owner:fv(w,"owner"),
-             due:fv(w,"due"),nextAction:fv(w,"nextAction")};
+             due:fv(w,"due"),nextAction:fv(w,"nextAction"),closure:fv(w,"closure")};
       editing=null;
       v.lastUpdated=today();
       saveCompany(c.id, v, function(s){
@@ -1750,14 +1798,15 @@
     {k:"triggerBasis",h:"Trigger Basis / Threshold",w:30},{k:"status",h:"Status",w:17},
     {k:"issueType",h:"Issue Type",w:15},{k:"priority",h:"Priority",w:13},
     {k:"situation",h:"Latest Situation",w:56},{k:"nextAction",h:"Next Action",w:46},
+    {k:"closure",h:"Strategic Closure",w:40},
     {k:"owner",h:"Owner",w:9},{k:"due",h:"Due / Next Review",w:16},
     {k:"legalNext",h:"Legal Next Step?",w:11},{k:"legalReq",h:"Legal Requirement",w:32},
     {k:"targetFeedback",h:"Target Feedback",w:13},{k:"vcTrack",h:"Value Creation Track",w:19},
     {k:"vcPlan",h:"Value Creation Plan",w:36},{k:"lastUpdated",h:"Last Updated",w:12,t:"d"}];
   var XL_TRACKER_BANDS=[
     {t:"PORTFOLIO",at:1,span:3},{t:"OUR POSITION",at:4,span:4},
-    {t:"CONTRACT & TRIGGERS",at:8,span:6},{t:"STATUS & ACTION",at:14,span:6},
-    {t:"LEGAL",at:20,span:3},{t:"VALUE CREATION",at:23,span:2},{t:"ADMIN",at:25,span:1}];
+    {t:"CONTRACT & TRIGGERS",at:8,span:6},{t:"STATUS & ACTION",at:14,span:7},
+    {t:"LEGAL",at:21,span:3},{t:"VALUE CREATION",at:24,span:2},{t:"ADMIN",at:26,span:1}];
   var XL_HISTORY_COLS=[
     {k:"date",h:"Date",w:13,t:"d"},{k:"company",h:"Company",w:16,t:"b"},
     {k:"entry",h:"Entry",w:112},{k:"source",h:"Source",w:24}];

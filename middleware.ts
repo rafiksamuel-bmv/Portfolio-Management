@@ -9,7 +9,10 @@ const ACCESS_CODE = 'bmv2026';
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
 export const config = {
-  matcher: ['/((?!_next/|images/|styles/|favicon.ico|config\\.js|404).*)'],
+  // api/ is excluded so the daily-brief cron can reach its function: the gate
+  // is a browser cookie, which a scheduled request will never carry. That
+  // endpoint guards itself with CRON_SECRET instead.
+  matcher: ['/((?!api/|_next/|images/|styles/|favicon.ico|config\\.js|404).*)'],
 };
 
 export default function middleware(request: Request) {

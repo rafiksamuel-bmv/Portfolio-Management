@@ -34,9 +34,40 @@ Production: https://portfolio-management-five-cyan.vercel.app
 | `config.js` | Supabase URL and anon key |
 | `supabase-schema.sql` | Schema plus seed. Idempotent, safe to re-run |
 | `launch.sh` | Clears git locks and pushes |
-| `middleware.ts` | Soft link-share gate (see Architecture). The one non-static piece |
+| `middleware.ts` | Soft link-share gate (see Architecture) |
+| `api/daily-brief.js` | Daily portfolio brief: reads Supabase, emails it. Cron'd by `vercel.json` |
+| `vercel.json` | Cron schedule for the brief (06:00 UTC daily) |
 | `404.html` | Shown to anyone the middleware gate blocks |
 | `package.json`, `package-lock.json` | Only exist for `middleware.ts`'s `@vercel/functions` dependency |
+
+## Daily brief
+
+`api/daily-brief.js` builds the morning brief and emails it. It is dependency
+free on purpose: Supabase and Resend are both plain REST, so nothing is
+installed for it. `buildBrief()` is exported separately from the handler so the
+output can be rendered and checked without sending anything.
+
+- Each company gets a timeline: its last four history entries dated, then the
+  **NEXT** node (first bullet of `next_action` plus the due date), then the
+  **CLOSE** node (`closure`). `closure` is the only field written for the brief
+  rather than the app — it says what finishing the position looks like, which
+  `next_action` never captured.
+- The activity window is **three days**, not one, and falls back to the five
+  most recent entries when nothing is in the window. A 24-hour window went
+  blank on a quiet day, which is when the reader most needs the context.
+- Desks are grouped by `status`, not by `owner`: status already says who holds
+  the ball (Mina = Pending legal, Rafik = Pending company, Reem = Pending our
+  action). The row owner is shown alongside, because the two can legitimately
+  differ — Zammit is owned by Reem while the blocking item sits with counsel.
+- It needs the **service role** key, not the anon key: RLS grants only
+  `authenticated`, and a cron has no session.
+- `?preview=1` returns the HTML without sending. Guarded by `CRON_SECRET`.
+- `middleware.ts` excludes `api/` so the cron can reach it; a scheduled request
+  will never carry the browser gate cookie.
+
+Environment, all set in Vercel and never in the repo: `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `BRIEF_TO`, `BRIEF_FROM`,
+`CRON_SECRET`.
 
 ## Data model
 
