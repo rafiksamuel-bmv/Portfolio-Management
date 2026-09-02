@@ -644,6 +644,12 @@
      the original maturity standing (CLN cl. 14.1 — no variation is effective
      unless signed by each party). */
   function effMaturity(c){ return c.extendedTo || c.maturityDate; }
+  /* A real calendar date, so 2027-02-30 is rejected rather than rolled over. */
+  function isYmd(s){
+    var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s); if(!m) return false;
+    var d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+    return d.getUTCFullYear()===+m[1] && d.getUTCMonth()===+m[2]-1 && d.getUTCDate()===+m[3];
+  }
   /* Past maturity is computed, never typed, so a lapsed note cannot sit here
      looking green because nobody remembered to change a dropdown. */
   function maturityAlert(c){
@@ -727,12 +733,15 @@
       var v=r[CO_COLS[k]]; o[k]=(v===null||v===undefined)?"":v; });
     return o;
   }
+  /* Columns Postgres will not accept "" for. Listed explicitly: a pattern over
+     the column name silently missed extended_to, so clearing it threw. */
+  var NULLABLE=["payment_date","maturity_date","extended_to","last_updated","legal_raised_at",
+                "invested","cap","discount","num"];
   function patchToRow(p){
     var r={}; Object.keys(p).forEach(function(k){
       if(!CO_COLS[k]) return;
       var v=p[k];
-      if(v==="" && /date|_at$/.test(CO_COLS[k])) v=null;
-      if(v==="" && ["invested","cap","discount","num"].indexOf(CO_COLS[k])>-1) v=null;
+      if(v==="" && NULLABLE.indexOf(CO_COLS[k])>-1) v=null;
       r[CO_COLS[k]]=v; });
     return r;
   }
@@ -1392,15 +1401,23 @@
       if(isNaN(inv)||inv<0){ toast("Invested must be a number.","bad"); return; }
       if(fv(w,"cap")!==""&&(isNaN(cap)||cap<0)){ toast("Valuation cap must be a number.","bad"); return; }
       if(fv(w,"discount")!==""&&(isNaN(d)||d<0||d>1)){ toast("Discount is a fraction, 0.2 for 20%.","bad"); return; }
+      var badDate=[["paymentDate","Payment date"],["maturityDate","Maturity date"],
+                   ["extendedTo","Extended to"]].filter(function(f){
+        var s=(fv(w,f[0])||"").trim(); return s!=="" && !isYmd(s); })[0];
+      if(badDate){ toast(badDate[1]+" must be a date like 2028-02-29, or left empty.","bad"); return; }
       var p={ccy:fv(w,"ccy"),invested:inv,cap:fv(w,"cap")===""?"":cap,discount:fv(w,"discount")===""?"":d,
              paymentDate:fv(w,"paymentDate"),maturityDate:fv(w,"maturityDate"),extendedTo:fv(w,"extendedTo"),
              status:fv(w,"status"),nextTrigger:fv(w,"nextTrigger"),triggerBasis:fv(w,"triggerBasis")};
       editing=null;
       p.lastUpdated=today();
+      /* Removing an extension puts the note back past maturity. Say so out
+         loud rather than letting a red pill appear unannounced. */
+      var wasClear=!maturityAlert(c), nowAlert=maturityAlert(p);
       saveCompany(c.id, p, function(s){
         var t=s.companies.filter(function(x){return x.id===c.id;})[0];
         Object.keys(p).forEach(function(k){ t[k]=p[k]; });
       });
+      if(wasClear && nowAlert) toast(c.company+" is now "+nowAlert+".","warn");
       return;
     }
     if(a==="saveL"){
