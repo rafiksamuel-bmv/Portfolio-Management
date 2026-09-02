@@ -52,6 +52,13 @@ places: the SQL, `CO_COLS`, and wherever it renders.
 
 ## Code conventions
 
+- **Latest Situation is not stored. It is the newest `history` entry for that
+  company**, resolved by `latestSituation()`. There is no `situation` column and
+  nothing should reintroduce one: the two used to hold the same events in two
+  places and had already drifted apart. The situation box in "Edit status &
+  action" writes a history row rather than a column, so updating the situation
+  and logging history are the same act, and the log stays chronological.
+  Ordering is `entry_date` desc, then `created_at` desc to break same-day ties.
 - Everything renders from one `state` object. Render functions read `state` and
   nothing else; never fetch inside a render.
 - Writes go through `saveCompany` / `addMessage` / `removeMessage` / `addHistory`
