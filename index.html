@@ -219,6 +219,8 @@
     border-radius:7px; padding:7px 10px; margin:6px 0 2px; }
   .matwarn-fix{ display:block; margin-top:7px; }
   .hint-inline{ font-size:10.5px; font-weight:400; color:var(--ink-faint); font-family:Archivo,sans-serif; }
+  .sit-src{ font-size:10.5px; color:var(--ink-faint); font-family:"IBM Plex Mono",monospace;
+    margin-top:5px; }
   .acts{ display:flex; gap:7px; margin-top:10px; flex-wrap:wrap; }
   .eform{ display:grid; gap:9px; margin-top:8px; }
   .eform.two{ grid-template-columns:1fr 1fr; }
@@ -644,6 +646,19 @@
      the original maturity standing (CLN cl. 14.1 — no variation is effective
      unless signed by each party). */
   function effMaturity(c){ return c.extendedTo || c.maturityDate; }
+
+  /* Latest Situation is not stored. It IS the newest history entry, so the two
+     can never drift or say different things. The only way to change it is to
+     log an entry, which is what keeps the record chronological. */
+  function latestHistory(c){
+    var rows=state.history.filter(function(h){ return h.company===c.company; });
+    if(!rows.length) return null;
+    return rows.slice().sort(function(a,b){
+      var d=String(b.date).localeCompare(String(a.date));
+      return d || String(b.createdAt||"").localeCompare(String(a.createdAt||""));
+    })[0];
+  }
+  function latestSituation(c){ var h=latestHistory(c); return h?h.entry:""; }
   /* A real calendar date, so 2027-02-30 is rejected rather than rolled over. */
   function isYmd(s){
     var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s); if(!m) return false;
@@ -724,7 +739,9 @@
     ccy:"ccy", invested:"invested", cap:"cap", discount:"discount", paymentDate:"payment_date",
     maturityDate:"maturity_date", extendedTo:"extended_to", nextTrigger:"next_trigger",
     triggerBasis:"trigger_basis", status:"status", issueType:"issue_type",
-    priority:"priority", situation:"situation", nextAction:"next_action", owner:"owner",
+    /* situation is deliberately absent: Latest Situation is derived from the
+       newest History entry, never stored on the company. */
+    priority:"priority", nextAction:"next_action", owner:"owner",
     due:"due", legalNext:"legal_next", legalReq:"legal_req", targetFeedback:"target_feedback",
     vcTrack:"vc_track", vcPlan:"vc_plan", lastUpdated:"last_updated", legalRaisedAt:"legal_raised_at" };
 
@@ -761,7 +778,8 @@
       if(err){ showLoadError(err.error.message); return; }
       state.companies = res[0].data.map(rowToCo);
       state.history   = res[1].data.map(function(h){
-        return {id:h.id, date:h.entry_date, company:h.company, entry:h.entry, source:h.source}; });
+        return {id:h.id, date:h.entry_date, company:h.company, entry:h.entry, source:h.source,
+                createdAt:h.created_at}; });
       state.messages  = res[2].data.map(function(m){
         return {id:m.id, ts:m.created_at, seat:m.seat, companyId:m.company_id, text:m.body}; });
       var kv={}; res[3].data.forEach(function(r){ kv[r.key]=r.value; });
@@ -1121,7 +1139,7 @@
       if(filters.legal&&c.legalNext!=="YES") return false;
       if(filters.attn&&!needsAttention(c)) return false;
       if(q){
-        var h=(c.company+" "+c.situation+" "+c.nextAction+" "+c.instrument+" "+c.vcPlan+" "+
+        var h=(c.company+" "+latestSituation(c)+" "+c.nextAction+" "+c.instrument+" "+c.vcPlan+" "+
                c.legalReq+" "+c.triggerBasis+" "+c.owner).toLowerCase();
         if(h.indexOf(q)===-1) return false;
       }
@@ -1197,6 +1215,7 @@
     var eS=editing===c.id+":s", eP=editing===c.id+":p", eL=editing===c.id+":l", eV=editing===c.id+":v";
     var mAlert=maturityAlert(c);
 
+    var lastH = latestHistory(c);
     var col1 = eS ?
       '<div class="eform two">'+
       '<div><label>Issue type</label>'+sel("issueType",state.lists.issueType,c.issueType)+'</div>'+
@@ -1204,13 +1223,20 @@
       '<div><label>Bucket</label>'+sel("bucket",state.lists.bucket,c.bucket)+'</div>'+
       '<div><label>Owner</label><input data-f="owner" value="'+esc(c.owner)+'" list="ownerList"></div>'+
       '<div class="full"><label>Due / next review</label><input data-f="due" value="'+esc(c.due)+'"></div>'+
-      '<div class="full"><label>Latest situation</label><textarea data-f="situation">'+esc(c.situation)+'</textarea></div>'+
+      '<div class="full"><label>Situation update '+
+        '<span class="hint-inline">logged to History and becomes the Latest Situation; leave empty to keep the current one</span></label>'+
+        '<textarea data-f="situation" placeholder="What has happened since '+
+        (lastH?esc(dmy(lastH.date)):"the last entry")+'?"></textarea></div>'+
+      '<div><label>Dated</label><input data-f="sitDate" value="'+esc(today())+'" placeholder="YYYY-MM-DD"></div>'+
+      '<div><label>Source</label><input data-f="sitSource" value="" placeholder="Email, Counsel opinion…"></div>'+
       '<div class="full"><label>Next action</label><textarea data-f="nextAction">'+esc(c.nextAction)+'</textarea></div>'+
       '</div><div class="acts"><button class="btn btn-primary btn-sm" data-act="saveS">Save</button>'+
       '<button class="btn btn-sm" data-act="cancel">Cancel</button></div>'
       :
       (mAlert?'<div class="basis" style="border-color:var(--maroon-bright);color:var(--crit);margin-bottom:9px;"><b>'+esc(mAlert)+'</b></div>':'')+
-      '<div class="bullets">'+esc(c.situation||"—")+'</div>'+
+      '<div class="bullets">'+esc(latestSituation(c)||"—")+'</div>'+
+      (lastH?'<div class="sit-src">'+esc(dmy(lastH.date))+(lastH.source?' · '+esc(lastH.source):'')+
+        ' · newest History entry</div>':'')+
       '<h4>Next action</h4><div class="bullets">'+esc(c.nextAction||"—")+'</div>'+
       '<div class="kv"><span class="k">Owner</span><span class="v">'+esc(c.owner||"—")+'</span></div>'+
       '<div class="kv"><span class="k">Due / next review</span><span class="v">'+esc(c.due||"—")+dueTag(c)+'</span></div>'+
@@ -1386,14 +1412,21 @@
       return;
     }
     if(a==="saveS"){
+      /* Latest Situation is the newest History entry, so a situation update is
+         written as a history row rather than back onto the company. */
+      var sit=(fv(w,"situation")||"").trim();
+      var sitDate=(fv(w,"sitDate")||"").trim()||today();
+      if(sit && !isYmd(sitDate)){ toast("The situation update date must look like 2026-09-02.","bad"); return; }
       var v={issueType:fv(w,"issueType"),priority:fv(w,"priority"),bucket:fv(w,"bucket"),owner:fv(w,"owner"),
-             due:fv(w,"due"),situation:fv(w,"situation"),nextAction:fv(w,"nextAction")};
+             due:fv(w,"due"),nextAction:fv(w,"nextAction")};
       editing=null;
       v.lastUpdated=today();
       saveCompany(c.id, v, function(s){
         var t=s.companies.filter(function(x){return x.id===c.id;})[0];
         Object.keys(v).forEach(function(k){ t[k]=v[k]; });
       });
+      if(sit) addHistory({date:sitDate, company:c.company, entry:sit,
+                          source:(fv(w,"sitSource")||"").trim()||"Situation update"});
       return;
     }
     if(a==="saveP"){
@@ -1730,7 +1763,10 @@
     {k:"entry",h:"Entry",w:112},{k:"source",h:"Source",w:24}];
 
   function exportXlsx(){
-    var rows=visible();
+    /* Latest Situation is derived, so resolve it before the sheet is built. */
+    var rows=visible().map(function(c){
+      var o={}; Object.keys(c).forEach(function(k){ o[k]=c[k]; });
+      o.situation=latestSituation(c); return o; });
     var hist=state.history.slice().sort(function(a,b){
       return String(b.date).localeCompare(String(a.date)); });
     var blob=buildXlsx([
