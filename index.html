@@ -392,7 +392,7 @@
     </div>
     <div class="grid3">
       <div class="card cardp"><h3>Priority</h3><div id="brkPriority"></div></div>
-      <div class="card cardp"><h3>Trigger status</h3><div id="brkTrigger"></div></div>
+      <div class="card cardp"><h3>Status</h3><div id="brkTrigger"></div></div>
       <div class="card cardp"><h3>Value creation track</h3><div id="brkTrack"></div></div>
     </div>
     <div class="card cardp">
@@ -712,9 +712,11 @@
   function pctv(v){ return (v===""||v==null)?"—":Math.round(Number(v)*100)+"%"; }
 
   function priCls(p){ return p==="Immediate"?"p-crit":p==="Near-Term"?"p-warn":p==="Postponed"?"p-calm":"p-ok"; }
-  function statusCls(s){ return s==="Disputed"?"p-crit":
-    (s==="Waiting on company"||s==="Decision due")?"p-warn":
-    s==="In progress"?"p-calm":s==="On track"?"p-ok":"p-mute"; }
+  /* Status says who holds the ball, so the colours track that and leave
+     urgency to Priority: ours is the only one we can move. */
+  function statusCls(s){ return s==="Pending our action"?"p-warn":
+    s==="Pending legal"?"p-calm":s==="Pending company"?"p-mute":
+    s==="On track"?"p-ok":"p-mute"; }
   function buckCls(b){ return b==="Growing"?"p-ok":b==="Stable"?"p-calm":b==="Watchlist"?"p-warn":
     b==="Pivoting"?"p-mute":"p-crit"; }
 
@@ -1090,7 +1092,7 @@
     $("brkPriority").innerHTML=bars(countBy("priority",state.lists.priority),function(l){
       return l==="Immediate"?"crit":l==="Near-Term"?"warn":l==="Postponed"?"":"ok"; });
     $("brkTrigger").innerHTML=bars(countBy("status",state.lists.status),function(l){
-      return l==="Disputed"?"crit":(l==="Waiting on company"||l==="Decision due")?"warn":
+      return l==="Pending our action"?"warn":l==="Pending legal"?"":
         l==="On track"?"ok":"mute"; });
     $("brkTrack").innerHTML=bars(countBy("vcTrack",state.lists.track),function(l){
       return l==="None currently"?"mute":""; });
