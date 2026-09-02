@@ -62,10 +62,14 @@ output can be rendered and checked without sending anything.
 - The activity window is **three days**, not one, and falls back to the five
   most recent entries when nothing is in the window. A 24-hour window went
   blank on a quiet day, which is when the reader most needs the context.
-- Desks are grouped by `status`, not by `owner`: status already says who holds
-  the ball (Mina = Pending legal, Rafik = Pending company, Reem = Pending our
-  action). The row owner is shown alongside, because the two can legitimately
-  differ — Zammit is owned by Reem while the blocking item sits with counsel.
+- **Desks come from `owner`, not from `status`.** The two answer different
+  questions and are independent. `status` is who holds the ball — us, counsel,
+  or the company. `owner` is which of the three has to move it, and so whose
+  desk it lands on. "Pending legal" means it has actually gone to Shawarby;
+  something Reem has asked Mina to send is still **Pending our action, on
+  Mina's desk**, which a status-derived desk could not express. A company whose
+  owner is blank or not one of the three appears under **Unassigned** rather
+  than dropping off the brief.
 - It needs the **service role** key, not the anon key: RLS grants only
   `authenticated`, and a cron has no session.
 - `?preview=1` returns the HTML without sending. Guarded by `CRON_SECRET`.

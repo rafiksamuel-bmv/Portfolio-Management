@@ -18,16 +18,18 @@
 
 const DEFAULT_TO = 'rafiksamuel@aucegypt.edu';
 
-/* Who moves each item. The status field already says who holds the ball, so
-   the desks fall straight out of it rather than being a second thing to keep
-   in step. */
+/* Desks come from `owner`, not from `status`. The two answer different
+   questions: status is who holds the ball (us, counsel, or the company), owner
+   is which of us has to move it. They are independent -- an item Reem has
+   asked Mina to send to Shawarby is "Pending our action" sitting on Mina's
+   desk, which a status-derived desk could not express. */
 const DESKS = [
-  { key: 'Pending legal',      who: 'Mina',  role: 'counsel liaison',
-    lead: 'Chase counsel, and keep the ask precise enough to answer.' },
-  { key: 'Pending company',    who: 'Rafik', role: 'company outreach',
-    lead: 'Write to the companies. Escalate anything that has run long.' },
-  { key: 'Pending our action', who: 'Reem',  role: 'decisions & Mr. Mohamed',
-    lead: 'Decide, or take it to Mr. Mohamed. Nobody else is holding these.' },
+  { who: 'Mina',  role: 'counsel liaison',
+    lead: 'Everything that goes to or comes back from El-Shawarby.' },
+  { who: 'Rafik', role: 'company outreach',
+    lead: 'Everything that goes to or comes back from the companies.' },
+  { who: 'Reem',  role: 'decisions & Mr. Mohamed',
+    lead: 'Calls to make, and anything that needs Mr. Mohamed.' },
 ];
 
 /* ---------- dates ---------- */
@@ -241,7 +243,8 @@ export function buildBrief({ companies, history, today }) {
 
   /* ---- top line: state the position, do not editorialise ---- */
   const counts = {};
-  DESKS.forEach(d => { counts[d.key] = byNum.filter(c => c.status === d.key).length; });
+  ['Pending legal', 'Pending company', 'Pending our action'].forEach(k => {
+    counts[k] = byNum.filter(c => c.status === k).length; });
   const topline =
     `${counts['Pending legal']} with counsel, ${counts['Pending company']} with the companies, `
   + `${counts['Pending our action']} ours to decide. `
@@ -342,7 +345,7 @@ export function buildBrief({ companies, history, today }) {
   }
 
   function deskBlock(desk) {
-    const rows = byNum.filter(c => c.status === desk.key);
+    const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
     const head = `
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="font-size:17px;font-weight:700;color:${C.ink};letter-spacing:-.01em;">
@@ -350,7 +353,9 @@ export function buildBrief({ companies, history, today }) {
           <span style="font-weight:400;color:${C.faint};font-size:12.5px;">
             · ${esc(desk.role)}</span></td>
         <td align="right">${pill(rows.length ? rows.length + (rows.length === 1 ? ' item' : ' items')
-                                              : 'clear', ...statusTone(desk.key).slice(0, 2))}</td>
+                                              : 'clear',
+                                 rows.length ? C.maroon : C.ok,
+                                 rows.length ? C.page : C.okBg)}</td>
       </tr></table>
       <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>`;
 
@@ -367,6 +372,28 @@ export function buildBrief({ companies, history, today }) {
       <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
         <div style="background:${C.soft};padding:14px 18px;border-bottom:1px solid ${C.line};">
           ${head}</div>
+        <table width="100%" cellpadding="0" cellspacing="0"
+               style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
+      </div></td></tr>`;
+  }
+
+  /* Nothing should fall off the brief because its owner is blank or is
+     somebody other than the three desks. */
+  function orphanBlock() {
+    const named = DESKS.map(d => d.who);
+    const rows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+    if (!rows.length) return '';
+    return `<tr><td style="padding:0 28px 16px;">
+      <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
+        <div style="background:${C.soft};padding:14px 18px;border-bottom:1px solid ${C.line};">
+          <table width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td style="font-size:17px;font-weight:700;color:${C.ink};">Unassigned</td>
+            <td align="right">${pill(rows.length + (rows.length === 1 ? ' item' : ' items'),
+                                     C.warn, C.warnBg)}</td>
+          </tr></table>
+          <div style="font-size:12px;color:${C.faint};margin-top:4px;">
+            No owner set, so nobody is holding these. Set an owner in the tracker.</div>
+        </div>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
       </div></td></tr>`;
@@ -441,7 +468,7 @@ export function buildBrief({ companies, history, today }) {
   <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table></td></tr>
 
   ${section('Your morning', 'What each person is holding, where it stands, and what to do about it')}
-  ${DESKS.map(deskBlock).join('')}
+  ${DESKS.map(deskBlock).join('')}${orphanBlock()}
 
   ${section('Clocks', 'Past maturity, and reviews due inside seven days')}
   <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${clocks}</table></td></tr>
