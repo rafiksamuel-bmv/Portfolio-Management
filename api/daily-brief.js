@@ -66,13 +66,26 @@ function overdueLabel(today, c) {
   return c.extended_to ? `${age} (extended to ${dmy(c.extended_to)})`
                        : `${age}, no signed extension`;
 }
-function historyFor(history, c) {
-  return history.filter(h => h.company === c.company).slice().sort((a, b) =>
-    String(b.entry_date).localeCompare(String(a.entry_date)) ||
-    String(b.created_at || '').localeCompare(String(a.created_at || ''))
-  );
+const DONE_SRC = 'Action completed';
+function historyFor(history, c, withDone) {
+  return history
+    .filter(h => h.company === c.company && (withDone || h.source !== DONE_SRC))
+    .slice().sort((a, b) =>
+      String(b.entry_date).localeCompare(String(a.entry_date)) ||
+      String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    );
 }
+/* Where it stands is the position, not the last task ticked off, so entries
+   logged by the tick box are shown separately rather than as the situation. */
 function latestEntry(history, c) { return historyFor(history, c)[0] || null; }
+function doneRecent(history, c, n) {
+  return history
+    .filter(h => h.company === c.company && h.source === DONE_SRC)
+    .slice().sort((a, b) =>
+      String(b.entry_date).localeCompare(String(a.entry_date)) ||
+      String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    ).slice(0, n || 3);
+}
 
 /* next_action and closure are written as "• " bullet lines. */
 function toLines(text) {
@@ -292,6 +305,20 @@ export function buildBrief({ companies, history, today }) {
       <div style="font-size:13px;line-height:1.55;color:${C.mid};">${
         last ? esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, ''))
              : `<span style="color:${C.faint};">Nothing logged yet.</span>`}</div>
+
+      ${(() => {
+        const done = doneRecent(history, c);
+        return done.length
+          ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:7px;">${
+              done.map(h => `<tr>
+                <td width="14" valign="top" style="font-size:12px;color:${C.ok};
+                    font-weight:700;padding:1px 0 0;">&#10003;</td>
+                <td style="font-size:12px;line-height:1.5;color:${C.faint};padding-bottom:3px;">${
+                  esc(String(h.entry).replace(/^Completed:\s*/, ''))}
+                  <span style="font-family:${MONO};font-size:10px;"> · ${esc(dmy(h.entry_date))}</span>
+                </td></tr>`).join('')}</table>`
+          : '';
+      })()}
 
       ${c.legal_req && c.status === 'Pending legal'
         ? label('THE ASK') + `<div style="font-size:12.5px;line-height:1.5;color:${C.mid};">${

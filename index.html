@@ -210,6 +210,11 @@
     margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid var(--blush-2); }
   .dcol h4 + h4, .dcol > * + h4{ margin-top:18px; }
   .bullets{ font-size:13px; white-space:pre-wrap; }
+  .donelist{ margin-top:9px; display:flex; flex-direction:column; gap:4px; }
+  .doneitem{ display:flex; gap:7px; align-items:baseline; font-size:12px; color:var(--ink-soft); }
+  .doneitem .tick{ color:var(--ok); font-weight:700; flex:none; }
+  .doneitem .when{ margin-left:auto; font-family:"IBM Plex Mono",monospace; font-size:10.5px;
+    color:var(--ink-faint); flex:none; }
   .todo{ display:flex; flex-direction:column; gap:6px; margin-top:2px; }
   .todo-item{ display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer;
     padding:5px 7px; border-radius:7px; border:1px solid transparent; }
@@ -668,15 +673,26 @@
   /* Latest Situation is not stored. It IS the newest history entry, so the two
      can never drift or say different things. The only way to change it is to
      log an entry, which is what keeps the record chronological. */
-  function latestHistory(c){
-    var rows=state.history.filter(function(h){ return h.company===c.company; });
-    if(!rows.length) return null;
+  /* Ticking an action logs it under this source. Those entries are shown
+     alongside the situation as completed work, not in place of it: finishing a
+     task is not the same as the position having changed. */
+  var DONE_SRC="Action completed";
+  function histSorted(rows){
     return rows.slice().sort(function(a,b){
       var d=String(b.date).localeCompare(String(a.date));
       return d || String(b.createdAt||"").localeCompare(String(a.createdAt||""));
-    })[0];
+    });
+  }
+  function latestHistory(c, withDone){
+    var rows=state.history.filter(function(h){
+      return h.company===c.company && (withDone || h.source!==DONE_SRC); });
+    return rows.length? histSorted(rows)[0] : null;
   }
   function latestSituation(c){ var h=latestHistory(c); return h?h.entry:""; }
+  function doneRecent(c, n){
+    return histSorted(state.history.filter(function(h){
+      return h.company===c.company && h.source===DONE_SRC; })).slice(0, n||4);
+  }
   /* A real calendar date, so 2027-02-30 is rejected rather than rolled over. */
   function isYmd(s){
     var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s); if(!m) return false;
@@ -1380,6 +1396,7 @@
       '<div class="bullets">'+esc(latestSituation(c)||"—")+'</div>'+
       (lastH?'<div class="sit-src">'+esc(dmy(lastH.date))+(lastH.source?' · '+esc(lastH.source):'')+
         ' · newest History entry</div>':'')+
+      doneBlock(c)+
       '<h4>Next action</h4>'+actionList(c)+
       '<h4>Strategic closure</h4><div class="bullets">'+esc(c.closure||"—")+'</div>'+
       '<div class="kv"><span class="k">Owner</span><span class="v">'+esc(c.owner||"—")+'</span></div>'+
@@ -1477,6 +1494,14 @@
     return String(c.nextAction||"").split("\n")
       .map(function(l){ return l.trim(); }).filter(Boolean);
   }
+  function doneBlock(c){
+    var done=doneRecent(c);
+    if(!done.length) return "";
+    return '<div class="donelist">'+done.map(function(h){
+      return '<div class="doneitem"><span class="tick">\u2713</span>'+
+        '<span>'+esc(h.entry.replace(/^Completed:\s*/,""))+'</span>'+
+        '<span class="when">'+esc(dmy(h.date))+'</span></div>'; }).join("")+'</div>';
+  }
   function actionList(c){
     var lines=actionLines(c);
     if(!lines.length) return '<div class="bullets">\u2014</div>';
@@ -1492,7 +1517,7 @@
     var text=line.replace(/^[\u2022\-]\s*/,"");
     var rest=lines.filter(function(_,i){ return i!==idx; }).join("\n");
     var was=c.nextAction, stamp=today();
-    addHistory({date:stamp, company:c.company, entry:text, source:"Action completed"});
+    addHistory({date:stamp, company:c.company, entry:"Completed: "+text, source:DONE_SRC});
     var patch={nextAction:rest, lastUpdated:stamp};
     saveCompany(c.id, patch, function(s){
       var t=s.companies.filter(function(x){ return x.id===c.id; })[0];
@@ -1502,7 +1527,7 @@
       /* Put the line back, and drop the history row it created. Matched on
          company, date and text, since addHistory does not hand back an id. */
       var h=state.history.filter(function(x){
-        return x.company===c.company && x.date===stamp && x.entry===text; })[0];
+        return x.company===c.company && x.date===stamp && x.entry==="Completed: "+text; })[0];
       if(h) removeHistory(h.id);
       var back={nextAction:was, lastUpdated:stamp};
       saveCompany(c.id, back, function(s){
