@@ -47,6 +47,14 @@ free on purpose: Supabase and Resend are both plain REST, so nothing is
 installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
+- Each company gets a timeline: its last four history entries dated, then the
+  **NEXT** node (first bullet of `next_action` plus the due date), then the
+  **CLOSE** node (`closure`). `closure` is the only field written for the brief
+  rather than the app — it says what finishing the position looks like, which
+  `next_action` never captured.
+- The activity window is **three days**, not one, and falls back to the five
+  most recent entries when nothing is in the window. A 24-hour window went
+  blank on a quiet day, which is when the reader most needs the context.
 - Desks are grouped by `status`, not by `owner`: status already says who holds
   the ball (Mina = Pending legal, Rafik = Pending company, Reem = Pending our
   action). The row owner is shown alongside, because the two can legitimately

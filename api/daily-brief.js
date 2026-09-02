@@ -65,13 +65,18 @@ function overdueLabel(today, c) {
   return c.extended_to ? `${age} (extended to ${dmy(c.extended_to)})`
                        : `${age}, no signed extension`;
 }
-function latestEntry(history, c) {
-  const rows = history.filter(h => h.company === c.company);
-  if (!rows.length) return null;
-  return rows.slice().sort((a, b) =>
+function historyFor(history, c) {
+  return history.filter(h => h.company === c.company).slice().sort((a, b) =>
     String(b.entry_date).localeCompare(String(a.entry_date)) ||
     String(b.created_at || '').localeCompare(String(a.created_at || ''))
-  )[0];
+  );
+}
+function latestEntry(history, c) { return historyFor(history, c)[0] || null; }
+
+/* next_action and closure are written as "• " bullet lines. */
+function toLines(text) {
+  return String(text || '').split('\n')
+    .map(l => l.replace(/^[•\-]\s*/, '').trim()).filter(Boolean);
 }
 
 function esc(s) {
@@ -117,19 +122,106 @@ function pill(text, fg, bg) {
        + `white-space:nowrap;">${esc(text)}</span>`;
 }
 
+/* ---------- per-company timeline ----------
+   What happened, dated; then the one thing due next; then what closing this
+   position actually looks like. Built as a table so it survives Outlook. */
+function timeline(c, history, now) {
+  const past = historyFor(history, c).slice(0, 4).reverse();   // oldest first
+  const [fg, bg] = statusTone(c.status);
+  const od = overdueLabel(now, c);
+  const dueIn = daysFrom(now, c.due);
+  const actions = toLines(c.next_action);
+  const closure = toLines(c.closure);
+
+  const node = (dot, dotColor, label, labelColor, body, opts = {}) =>
+    `<tr>
+       <td width="18" valign="top" style="padding:0 10px 0 0;">
+         <div style="width:9px;height:9px;border-radius:9px;background:${dotColor};
+                     margin:5px 0 0 4px;${opts.hollow ? `background:${C.card};border:2px solid ${dotColor};` : ''}"></div>
+         ${opts.last ? '' : `<div style="width:2px;height:100%;min-height:16px;background:${C.line};
+                             margin:3px 0 0 7px;"></div>`}
+       </td>
+       <td valign="top" style="padding:0 0 ${opts.last ? '2px' : '13px'};">
+         <div style="font-size:10.5px;font-family:${MONO};color:${labelColor};
+                     font-weight:${opts.strong ? '700' : '400'};letter-spacing:.02em;">${label}</div>
+         <div style="font-size:12.5px;color:${C.mid};margin-top:2px;line-height:1.5;">${body}</div>
+       </td>
+     </tr>`;
+
+  const nodes = [];
+  past.forEach(h => nodes.push(node('', C.line,
+    `${esc(dmy(h.entry_date))}${h.source ? ' · ' + esc(h.source) : ''}`, C.faint,
+    esc(String(h.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 300))));
+
+  if (!past.length) nodes.push(node('', C.line, 'No history logged', C.faint,
+    `<span style="color:${C.faint};">Nothing recorded for this company yet.</span>`));
+
+  // the upcoming action
+  const dueLabel = c.due
+    ? `NEXT · due ${esc(c.due)}${dueIn !== null && dueIn <= 7
+        ? ` · ${dueIn < 0 ? Math.abs(dueIn) + ' days late' : dueIn === 0 ? 'today' : 'in ' + dueIn + ' days'}` : ''}`
+    : 'NEXT';
+  nodes.push(node('', dueIn !== null && dueIn <= 7 ? C.crit : C.gold,
+    dueLabel, dueIn !== null && dueIn <= 7 ? C.crit : C.warn,
+    actions.length
+      ? `<b style="color:${C.ink};">${esc(actions[0])}</b>`
+        + (actions.length > 1
+            ? `<div style="margin-top:4px;color:${C.faint};font-size:12px;">then ${
+                actions.slice(1).map(a => esc(a)).join(' · ')}</div>` : '')
+      : `<span style="color:${C.faint};">No next action recorded.</span>`,
+    { strong: true }));
+
+  // what closing looks like
+  nodes.push(node('', C.ok,
+    'CLOSE', C.ok,
+    closure.length
+      ? closure.map(l => esc(l)).join('<br>')
+      : `<span style="color:${C.faint};">No closure defined — add one in the tracker
+         so the desk knows what finishing this looks like.</span>`,
+    { hollow: true, last: true, strong: true }));
+
+  return `<tr><td style="padding:0 28px 16px;">
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border:1px solid ${C.line};border-radius:10px;">
+      <tr><td style="padding:14px 16px 10px;">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="font-size:15px;font-weight:700;color:${C.ink};">${esc(c.company)}
+            <span style="font-size:11px;font-weight:400;color:${C.faint};">
+              · ${esc(c.bucket || '')}${c.owner ? ' · ' + esc(c.owner) : ''}</span></td>
+          <td align="right">${pill(c.status || '—', fg, bg)}</td>
+        </tr></table>
+        <div style="font-size:11px;font-family:${MONO};color:${C.faint};margin-top:5px;">
+          ${esc(c.next_trigger || 'no trigger set')} ·
+          ${effMaturity(c) ? 'matures ' + esc(dmy(effMaturity(c))) : 'no maturity'}
+          ${od ? ` · <span style="color:${C.crit};font-weight:700;">${esc(od)}</span>` : ''}
+        </div>
+      </td></tr>
+      <tr><td style="padding:4px 16px 14px;">
+        <table width="100%" cellpadding="0" cellspacing="0">${nodes.join('')}</table>
+      </td></tr>
+    </table></td></tr>`;
+}
+
 /* ============================ the brief ============================ */
 export function buildBrief({ companies, history, asOf, today }) {
   const now = today || new Date();
   const todayStr = ymd(now);
-  const yesterday = ymd(new Date(now - MS_DAY));
+  /* A 24-hour window goes blank whenever yesterday was quiet, which is exactly
+     when you still want to see where things stand. Look back three days, and
+     fall back to the most recent entries rather than showing nothing. */
+  const LOOKBACK_DAYS = 3;
+  const since = ymd(new Date(now - LOOKBACK_DAYS * MS_DAY));
 
   const byNum = companies.slice().sort((a, b) => (a.num || 0) - (b.num || 0));
   const overdue = byNum.filter(c => overdueDays(now, c) !== null)
                        .sort((a, b) => overdueDays(now, b) - overdueDays(now, a));
   const immediate = byNum.filter(c => c.priority === 'Immediate');
-  const moved = history
-    .filter(h => h.entry_date >= yesterday)
-    .sort((a, b) => String(b.entry_date).localeCompare(String(a.entry_date)));
+  const sortByDate = (a, b) =>
+    String(b.entry_date).localeCompare(String(a.entry_date)) ||
+    String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  const recent = history.filter(h => h.entry_date >= since).sort(sortByDate);
+  const usingFallback = recent.length === 0;
+  const moved = usingFallback ? history.slice().sort(sortByDate).slice(0, 5) : recent;
 
   /* ---- top line: state the position, do not editorialise ---- */
   const counts = {};
@@ -202,46 +294,14 @@ export function buildBrief({ companies, history, asOf, today }) {
   }
 
   /* ---- what moved ---- */
-  const movedBlock = moved.length
-    ? moved.map(h => `<tr><td style="padding:9px 0;border-top:1px solid ${C.line};">
+  const movedBlock = moved.map(h => `<tr><td style="padding:9px 0;border-top:1px solid ${C.line};">
         <table width="100%" cellpadding="0" cellspacing="0"><tr>
           <td style="font-size:12.5px;font-weight:700;color:${C.ink};">${esc(h.company || 'General')}</td>
           <td align="right" style="font-size:11px;color:${C.faint};font-family:${MONO};">
             ${esc(dmy(h.entry_date))}${h.source ? ' · ' + esc(h.source) : ''}</td>
         </tr></table>
         <div style="font-size:12.5px;color:${C.mid};margin-top:3px;">${bullets(h.entry, C.faint)}</div>
-      </td></tr>`).join('')
-    : `<tr><td style="padding:10px 0;font-size:12.5px;color:${C.faint};">
-         Nothing logged since yesterday.</td></tr>`;
-
-  /* ---- roster ---- */
-  const roster = byNum.map(c => {
-    const [fg, bg] = statusTone(c.status);
-    const od = overdueDays(now, c);
-    const last = latestEntry(history, c);
-    return `<tr>
-      <td style="padding:10px 8px 10px 0;border-top:1px solid ${C.line};vertical-align:top;width:120px;">
-        <div style="font-size:13px;font-weight:700;color:${C.ink};">${esc(c.company)}</div>
-        <div style="font-size:10.5px;color:${C.faint};margin-top:2px;">${esc(c.bucket || '')}</div>
-      </td>
-      <td style="padding:10px 8px;border-top:1px solid ${C.line};vertical-align:top;width:132px;">
-        ${pill(c.status || '—', fg, bg)}
-        <div style="font-size:10.5px;color:${C.faint};margin-top:4px;">${esc(c.next_trigger || '—')}</div>
-      </td>
-      <td style="padding:10px 8px;border-top:1px solid ${C.line};vertical-align:top;width:96px;
-                 font-family:${MONO};font-size:11px;color:${C.mid};">
-        ${esc(dmy(effMaturity(c)))}
-        ${od !== null ? `<div style="color:${C.crit};font-weight:700;margin-top:2px;">
-            ${Math.floor(od / 30.44) >= 1 ? Math.floor(od / 30.44) + 'mo late' : od + 'd late'}</div>` : ''}
-      </td>
-      <td style="padding:10px 0 10px 8px;border-top:1px solid ${C.line};vertical-align:top;
-                 font-size:12px;color:${C.mid};">
-        ${last ? `<div style="font-size:10.5px;color:${C.faint};font-family:${MONO};margin-bottom:2px;">
-                    ${esc(dmy(last.entry_date))}${last.source ? ' · ' + esc(last.source) : ''}</div>
-                  ${bullets(last.entry, C.faint)}`
-               : `<span style="color:${C.faint};">No history logged.</span>`}
-      </td></tr>`;
-  }).join('');
+      </td></tr>`).join('');
 
   /* ---- clocks ---- */
   const dueSoon = byNum
@@ -295,7 +355,10 @@ export function buildBrief({ companies, history, asOf, today }) {
     </tr></table>
   </td></tr>
 
-  ${section('Moved since yesterday', moved.length ? `${moved.length} entr${moved.length === 1 ? 'y' : 'ies'} logged` : '')}
+  ${section(usingFallback ? 'Most recent activity' : 'Moved in the last three days',
+      usingFallback
+        ? 'Nothing logged in the last three days, so here are the latest entries on file'
+        : `${moved.length} entr${moved.length === 1 ? 'y' : 'ies'} logged`)}
   <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table></td></tr>
 
   ${section('Desks', 'Grouped by who holds the ball, not by who owns the relationship')}
@@ -304,8 +367,8 @@ export function buildBrief({ companies, history, asOf, today }) {
   ${section('Clocks', 'Past maturity, and reviews due inside seven days')}
   <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${clocks}</table></td></tr>
 
-  ${section('Every company', 'Status, what converts it, the governing maturity, and the last thing logged')}
-  <tr><td style="padding:0 28px 8px;"><table width="100%" cellpadding="0" cellspacing="0">${roster}</table></td></tr>
+  ${section('Every company', 'What happened, what is due next, and what closing the position looks like')}
+  ${byNum.map(c => timeline(c, history, now)).join('')}
 
   <tr><td style="padding:18px 28px 24px;border-top:1px solid ${C.line};">
     <div style="font-size:11.5px;color:${C.faint};line-height:1.6;">

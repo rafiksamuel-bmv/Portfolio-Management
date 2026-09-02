@@ -743,7 +743,7 @@
     triggerBasis:"trigger_basis", status:"status", issueType:"issue_type",
     /* situation is deliberately absent: Latest Situation is derived from the
        newest History entry, never stored on the company. */
-    priority:"priority", nextAction:"next_action", owner:"owner",
+    priority:"priority", nextAction:"next_action", closure:"closure", owner:"owner",
     due:"due", legalNext:"legal_next", legalReq:"legal_req", targetFeedback:"target_feedback",
     vcTrack:"vc_track", vcPlan:"vc_plan", lastUpdated:"last_updated", legalRaisedAt:"legal_raised_at" };
 
@@ -1232,6 +1232,9 @@
       '<div><label>Dated</label><input data-f="sitDate" value="'+esc(today())+'" placeholder="YYYY-MM-DD"></div>'+
       '<div><label>Source</label><input data-f="sitSource" value="" placeholder="Email, Counsel opinion…"></div>'+
       '<div class="full"><label>Next action</label><textarea data-f="nextAction">'+esc(c.nextAction)+'</textarea></div>'+
+      '<div class="full"><label>Strategic closure '+
+        '<span class="hint-inline">what "done" looks like for this position</span></label>'+
+        '<textarea data-f="closure" placeholder="e.g. Convert at the cap, or settle at 1x and close the file.">'+esc(c.closure)+'</textarea></div>'+
       '</div><div class="acts"><button class="btn btn-primary btn-sm" data-act="saveS">Save</button>'+
       '<button class="btn btn-sm" data-act="cancel">Cancel</button></div>'
       :
@@ -1240,6 +1243,7 @@
       (lastH?'<div class="sit-src">'+esc(dmy(lastH.date))+(lastH.source?' · '+esc(lastH.source):'')+
         ' · newest History entry</div>':'')+
       '<h4>Next action</h4><div class="bullets">'+esc(c.nextAction||"—")+'</div>'+
+      '<h4>Strategic closure</h4><div class="bullets">'+esc(c.closure||"—")+'</div>'+
       '<div class="kv"><span class="k">Owner</span><span class="v">'+esc(c.owner||"—")+'</span></div>'+
       '<div class="kv"><span class="k">Due / next review</span><span class="v">'+esc(c.due||"—")+dueTag(c)+'</span></div>'+
       '<div class="acts"><button class="btn btn-sm" data-act="editS">Edit status &amp; action</button></div>';
@@ -1420,7 +1424,7 @@
       var sitDate=(fv(w,"sitDate")||"").trim()||today();
       if(sit && !isYmd(sitDate)){ toast("The situation update date must look like 2026-09-02.","bad"); return; }
       var v={issueType:fv(w,"issueType"),priority:fv(w,"priority"),bucket:fv(w,"bucket"),owner:fv(w,"owner"),
-             due:fv(w,"due"),nextAction:fv(w,"nextAction")};
+             due:fv(w,"due"),nextAction:fv(w,"nextAction"),closure:fv(w,"closure")};
       editing=null;
       v.lastUpdated=today();
       saveCompany(c.id, v, function(s){
@@ -1752,14 +1756,15 @@
     {k:"triggerBasis",h:"Trigger Basis / Threshold",w:30},{k:"status",h:"Status",w:17},
     {k:"issueType",h:"Issue Type",w:15},{k:"priority",h:"Priority",w:13},
     {k:"situation",h:"Latest Situation",w:56},{k:"nextAction",h:"Next Action",w:46},
+    {k:"closure",h:"Strategic Closure",w:40},
     {k:"owner",h:"Owner",w:9},{k:"due",h:"Due / Next Review",w:16},
     {k:"legalNext",h:"Legal Next Step?",w:11},{k:"legalReq",h:"Legal Requirement",w:32},
     {k:"targetFeedback",h:"Target Feedback",w:13},{k:"vcTrack",h:"Value Creation Track",w:19},
     {k:"vcPlan",h:"Value Creation Plan",w:36},{k:"lastUpdated",h:"Last Updated",w:12,t:"d"}];
   var XL_TRACKER_BANDS=[
     {t:"PORTFOLIO",at:1,span:3},{t:"OUR POSITION",at:4,span:4},
-    {t:"CONTRACT & TRIGGERS",at:8,span:6},{t:"STATUS & ACTION",at:14,span:6},
-    {t:"LEGAL",at:20,span:3},{t:"VALUE CREATION",at:23,span:2},{t:"ADMIN",at:25,span:1}];
+    {t:"CONTRACT & TRIGGERS",at:8,span:6},{t:"STATUS & ACTION",at:14,span:7},
+    {t:"LEGAL",at:21,span:3},{t:"VALUE CREATION",at:24,span:2},{t:"ADMIN",at:26,span:1}];
   var XL_HISTORY_COLS=[
     {k:"date",h:"Date",w:13,t:"d"},{k:"company",h:"Company",w:16,t:"b"},
     {k:"entry",h:"Entry",w:112},{k:"source",h:"Source",w:24}];
