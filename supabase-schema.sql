@@ -161,9 +161,13 @@ insert into public.companies (id,num,company,instrument,bucket,ccy,invested,cap,
 on conflict (id) do nothing;
 
 -- ---------- 7. seed: the 58 history entries ----------
-create unique index if not exists history_dedupe
-  on public.history (entry_date, coalesce(company,''), md5(entry));
-insert into public.history (entry_date, company, entry, source) values
+-- Seeded only when the table is empty. There is deliberately no unique index
+-- here: one on (entry_date, company, md5(entry)) used to guard this insert,
+-- but it also stopped people logging two similar entries on the same day, or
+-- editing an entry into wording another already had. Undo in the app is the
+-- better safeguard against an accidental duplicate.
+insert into public.history (entry_date, company, entry, source)
+select * from (values
 ('2022-06-13', 'Amanleek', 'Convertible Note signed. Note amount USD 125,000. Cap USD 3.0m, 20% discount, QEF USD 2.0m, Target Financing USD 10.0m. Counterparty Amanleek PTE. LTD. (Singapore).', 'Signed note'),
 ('2023-06-13', 'Agel', 'Convertible Note signed. USD 125,000. Cap USD 4.8m, QEF USD 1.0m, Target Financing USD 1.0m. Counterparty Agel Fintech Holding PTE. LTD.', 'Signed note'),
 ('2023-06-13', 'Bringy', 'Convertible Note signed. USD 125,000. Cap USD 6.0m, QEF USD 2.0m, Target Financing USD 10.0m. Counterparty Bringy, Inc (Delaware).', 'Signed note'),
@@ -222,7 +226,8 @@ insert into public.history (entry_date, company, entry, source) values
 ('2026-08-30', 'Connect Money', 'BMV position set: do not join SAFE-2, move ahead with receiving a term sheet and signing the SHA.', 'BMV decision'),
 ('2026-08-30', 'Connect Money', 'Analysis of the SAFE against the cap table: the USD 15m cap read post-money gives 6.67%, an Equity Financing conversion at the 50% discount gives 6.06%, the company model gives 4.35%, and the strict pre-money reading of Company Capitalization gives 3.70%. Maturity conversion under Section 1(e) carries no discount and is the weakest route.', 'BMV analysis'),
 ('2026-08-30', 'Subsbase', 'Information request sent to the founders covering scope of the liquidation, IP registration and ownership, treatment of assets and liabilities, and their proposed approach to BM''s position. Rights expressly reserved and Sections 3(c) and 3(d) cited.', 'Email')
-on conflict do nothing;
+) as seed(entry_date, company, entry, source)
+where not exists (select 1 from public.history);
 
 -- ---------- 8. seed: legend lists, fx rate, deck figures, standing note ----------
 insert into public.settings (key, value) values

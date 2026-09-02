@@ -334,7 +334,8 @@
   .undochip{ display:inline-flex; align-items:center; gap:6px; background:rgba(255,255,255,.14);
     border:1px solid rgba(255,255,255,.34); color:#fff; border-radius:999px; padding:4px 12px;
     font-size:11.5px; font-weight:600; cursor:pointer; max-width:230px; }
-  .undochip:hover{ background:rgba(255,255,255,.24); }
+  .undochip:hover:not(.idle){ background:rgba(255,255,255,.24); }
+  .undochip.idle{ opacity:.42; cursor:default; }
   .undochip svg{ flex:none; }
   .undochip span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .toast.has-undo{ display:flex; align-items:center; gap:14px; justify-content:space-between; }
@@ -372,7 +373,7 @@
     <div class="mh-right">
       <button class="savechip" id="saveChip" type="button" title="Check for changes from other people now"><span class="savedot"></span><span id="saveTxt">live</span></button>
       <button class="newver" id="newVer" type="button" hidden>New changes · load</button>
-      <button class="undochip" id="undoBtn" type="button" hidden title="Undo"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg><span id="undoTxt">Undo</span></button>
+      <button class="undochip idle" id="undoBtn" type="button" title="Nothing to undo yet"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg><span id="undoTxt">Undo</span></button>
       <button class="bell" id="bellBtn" type="button" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span class="badge" id="bellBadge" hidden>0</span></button>
       <div class="seat-chip"><span class="role" id="seatRole">&mdash;</span><button id="signOut" type="button">Sign out</button></div>
     </div>
@@ -869,10 +870,18 @@
   function paintUndo(){
     var b=$("undoBtn"); if(!b) return;
     var top=undoStack[undoStack.length-1];
-    b.hidden=!top || readOnly;
+    /* Always on screen, dimmed when the stack is empty. Hiding it meant it was
+       invisible until you had already made the mistake it exists for. */
+    b.hidden=readOnly;
+    b.disabled=!top;
+    b.classList.toggle("idle",!top);
+    var t=$("undoTxt");
     if(top){
-      b.title="Undo: "+top.label;
-      var t=$("undoTxt"); if(t) t.textContent=top.label.length>26?top.label.slice(0,26)+"…":top.label;
+      b.title="Undo: "+top.label+"  (\u2318Z)";
+      if(t) t.textContent=top.label.length>24?top.label.slice(0,24)+"\u2026":top.label;
+    } else {
+      b.title="Nothing to undo yet";
+      if(t) t.textContent="Undo";
     }
   }
   function doUndo(){

@@ -148,6 +148,16 @@ colour only inside a media query. The two logos are base64 data URIs.
   back everything, including the seed.
 - `alter publication supabase_realtime add table` errors if the table is already a
   member. The script guards this; keep the guard.
+- There used to be a `history_dedupe` unique index on
+  `(entry_date, company, md5(entry))` to make the history seed re-runnable. It
+  was dropped: in daily use it blocked two similar entries on the same day and
+  blocked editing an entry into wording another already had. The seed now
+  guards itself with `where not exists (select 1 from public.history)`, and
+  **Undo** is the safeguard against accidental duplicates. Do not reintroduce it.
+- **Every write records its inverse** on a 20-deep undo stack (`pushUndo`).
+  Inserts carry a client-generated `uid()` rather than a Postgres default, so
+  undoing an insert can address the row and undoing a delete restores the same
+  id. `undoing` suppresses stacking during an undo, so the stack drains.
 - The Excel export writes the `.xlsx` by hand (`buildXlsx`): an xlsx is a ZIP of
   XML parts, and entries are stored **uncompressed**, so it needs only a CRC32
   and no library. SheetJS was not used because its free build cannot write cell
