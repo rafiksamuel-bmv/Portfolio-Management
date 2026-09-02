@@ -23,11 +23,11 @@ const DEFAULT_TO = 'rafiksamuel@aucegypt.edu';
    in step. */
 const DESKS = [
   { key: 'Pending legal',      who: 'Mina',  role: 'counsel liaison',
-    lead: 'With El-Shawarby. Nothing else moves until the advice lands.' },
+    lead: 'Chase counsel, and keep the ask precise enough to answer.' },
   { key: 'Pending company',    who: 'Rafik', role: 'company outreach',
-    lead: 'With the companies. Chase, and escalate where it has run long.' },
+    lead: 'Write to the companies. Escalate anything that has run long.' },
   { key: 'Pending our action', who: 'Reem',  role: 'decisions & Mr. Mohamed',
-    lead: 'Ours to decide. These are the only items no one else is holding.' },
+    lead: 'Decide, or take it to Mr. Mohamed. Nobody else is holding these.' },
 ];
 
 /* ---------- dates ---------- */
@@ -200,7 +200,7 @@ function timeline(c, history, now) {
 }
 
 /* ============================ the brief ============================ */
-export function buildBrief({ companies, history, asOf, today }) {
+export function buildBrief({ companies, history, today }) {
   const now = today || new Date();
   const todayStr = ymd(now);
   /* A 24-hour window goes blank whenever yesterday was quiet, which is exactly
@@ -210,6 +210,12 @@ export function buildBrief({ companies, history, asOf, today }) {
   const since = ymd(new Date(now - LOOKBACK_DAYS * MS_DAY));
 
   const byNum = companies.slice().sort((a, b) => (a.num || 0) - (b.num || 0));
+  /* Newest edit across the tracker, which is what the header now carries
+     instead of the separately-maintained asOf setting. */
+  const lastEdited = (() => {
+    const stamps = companies.map(c => c.updated_at || c.last_updated).filter(Boolean).sort();
+    return stamps.length ? dmy(String(stamps[stamps.length - 1]).slice(0, 10)) : '';
+  })();
   const overdue = byNum.filter(c => overdueDays(now, c) !== null)
                        .sort((a, b) => overdueDays(now, b) - overdueDays(now, a));
   const immediate = byNum.filter(c => c.priority === 'Immediate');
@@ -244,49 +250,98 @@ export function buildBrief({ companies, history, asOf, today }) {
        ${sub ? `<div style="font-size:12.5px;color:${C.faint};margin-top:3px;">${esc(sub)}</div>` : ''}
      </td></tr>`;
 
-  /* ---- desks ---- */
+  /* ---- desks ----
+     The centre of the brief. One block per person, and for each company on
+     their plate: where it stands, what they do about it, and what closing it
+     looks like. Everything a person needs is in their own block, so nobody
+     has to cross-reference another section to know their morning. */
+  const label = (text, right) =>
+    `<table width="100%" cellpadding="0" cellspacing="0" style="margin:11px 0 3px;"><tr>
+       <td style="font-size:9.5px;font-family:${MONO};font-weight:700;letter-spacing:.09em;
+                  color:${C.faint};">${esc(text)}</td>
+       ${right ? `<td align="right" style="font-size:10px;font-family:${MONO};
+                  color:${C.faint};">${right}</td>` : ''}
+     </tr></table>`;
+
+  function deskItem(c) {
+    const od = overdueLabel(now, c);
+    const due = daysFrom(now, c.due);
+    const hot = due !== null && due <= 7;
+    const last = latestEntry(history, c);
+    const actions = toLines(c.next_action);
+    const closure = toLines(c.closure);
+    const [fg, bg] = statusTone(c.status);
+
+    const dueRight = c.due
+      ? `due ${esc(c.due)}${hot ? ` · <b style="color:${C.crit};">${
+          due < 0 ? Math.abs(due) + ' days late' : due === 0 ? 'today' : due + ' days'}</b>` : ''}`
+      : 'no date set';
+
+    return `<tr><td style="padding:15px 0 17px;border-top:1px solid ${C.line};">
+      <table width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="font-size:15px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
+        <td align="right">${pill(c.status || '—', fg, bg)}</td>
+      </tr></table>
+      <div style="font-size:10.5px;font-family:${MONO};color:${C.faint};margin-top:4px;">
+        ${effMaturity(c) ? 'matures ' + esc(dmy(effMaturity(c))) : 'no maturity'}
+        ${od ? ` · <span style="color:${C.crit};font-weight:700;">${esc(od)}</span>` : ''}
+      </div>
+
+      ${label('WHERE IT STANDS', last
+          ? `${esc(dmy(last.entry_date))}${last.source ? ' · ' + esc(last.source) : ''}` : '')}
+      <div style="font-size:13px;line-height:1.55;color:${C.mid};">${
+        last ? esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, ''))
+             : `<span style="color:${C.faint};">Nothing logged yet.</span>`}</div>
+
+      ${c.legal_req && c.status === 'Pending legal'
+        ? label('THE ASK') + `<div style="font-size:12.5px;line-height:1.5;color:${C.mid};">${
+            esc(c.legal_req)}</div>` : ''}
+
+      ${label('WHAT TO DO', dueRight)}
+      ${actions.length
+        ? `<table width="100%" cellpadding="0" cellspacing="0">${actions.map(a =>
+            `<tr><td width="14" valign="top" style="font-size:13px;color:${C.gold};
+                     font-weight:700;padding:1px 0 0;">&#9656;</td>
+                 <td style="font-size:13px;line-height:1.55;color:${C.ink};
+                     font-weight:600;padding-bottom:4px;">${esc(a)}</td></tr>`).join('')}
+           </table>`
+        : `<div style="font-size:13px;color:${C.faint};">No next action recorded.</div>`}
+
+      ${closure.length
+        ? label('CLOSING THIS') + `<div style="font-size:12px;line-height:1.5;color:${C.faint};">${
+            esc(closure.join(' '))}</div>`
+        : ''}
+    </td></tr>`;
+  }
+
   function deskBlock(desk) {
     const rows = byNum.filter(c => c.status === desk.key);
+    const head = `
+      <table width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="font-size:17px;font-weight:700;color:${C.ink};letter-spacing:-.01em;">
+          ${esc(desk.who)}
+          <span style="font-weight:400;color:${C.faint};font-size:12.5px;">
+            · ${esc(desk.role)}</span></td>
+        <td align="right">${pill(rows.length ? rows.length + (rows.length === 1 ? ' item' : ' items')
+                                              : 'clear', ...statusTone(desk.key).slice(0, 2))}</td>
+      </tr></table>
+      <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>`;
+
     if (!rows.length) {
-      return `<tr><td style="padding:0 28px 14px;">
-        <div style="border:1px solid ${C.line};border-radius:9px;padding:14px 16px;background:${C.soft};">
-          <div style="font-size:14px;font-weight:700;color:${C.ink};">${esc(desk.who)}
-            <span style="font-weight:400;color:${C.faint};font-size:12px;">· ${esc(desk.role)}</span></div>
-          <div style="font-size:12.5px;color:${C.faint};margin-top:6px;">Nothing on this desk today.</div>
+      return `<tr><td style="padding:0 28px 16px;">
+        <div style="border:1px solid ${C.line};border-radius:10px;padding:15px 18px;
+                    background:${C.soft};">${head}
+          <div style="font-size:13px;color:${C.faint};margin-top:10px;">
+            Nothing waiting on ${esc(desk.who)} today.</div>
         </div></td></tr>`;
     }
-    const items = rows.map(c => {
-      const od = overdueLabel(now, c);
-      const due = daysFrom(now, c.due);
-      return `<tr><td style="padding:12px 0;border-top:1px solid ${C.line};">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="font-size:14px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
-          <td align="right" style="font-size:11px;color:${C.faint};font-family:${MONO};">
-            ${c.owner ? 'owner ' + esc(c.owner) : ''}${c.due ? ' · due ' + esc(c.due) : ''}
-            ${due !== null && due <= 7 ? ` <span style="color:${C.crit};font-weight:700;">${due < 0 ? Math.abs(due) + 'd late' : due + 'd'}</span>` : ''}
-          </td></tr></table>
-        ${od ? `<div style="font-size:11.5px;color:${C.crit};font-weight:600;margin-top:3px;">${esc(od)}</div>` : ''}
-        ${c.legal_req && desk.key === 'Pending legal'
-          ? `<div style="font-size:12.5px;color:${C.mid};margin-top:6px;">
-               <b style="color:${C.ink};">The ask:</b> ${esc(c.legal_req)}</div>` : ''}
-        <div style="font-size:12.5px;color:${C.mid};margin-top:6px;">
-          <b style="color:${C.ink};">To close:</b></div>
-        <div style="font-size:12.5px;color:${C.mid};margin-top:2px;">${bullets(c.next_action, C.faint)}</div>
-      </td></tr>`;
-    }).join('');
 
-    return `<tr><td style="padding:0 28px 14px;">
-      <div style="border:1px solid ${C.line};border-radius:9px;overflow:hidden;">
-        <div style="background:${C.soft};padding:12px 16px;border-bottom:1px solid ${C.line};">
-          <table width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td style="font-size:14px;font-weight:700;color:${C.ink};">${esc(desk.who)}
-              <span style="font-weight:400;color:${C.faint};font-size:12px;">· ${esc(desk.role)}</span></td>
-            <td align="right">${pill(rows.length + ' item' + (rows.length === 1 ? '' : 's'),
-                                     ...statusTone(desk.key).slice(0, 2))}</td>
-          </tr></table>
-          <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>
-        </div>
-        <table width="100%" cellpadding="0" cellspacing="0" style="padding:0 16px 4px;">${items}</table>
+    return `<tr><td style="padding:0 28px 16px;">
+      <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
+        <div style="background:${C.soft};padding:14px 18px;border-bottom:1px solid ${C.line};">
+          ${head}</div>
+        <table width="100%" cellpadding="0" cellspacing="0"
+               style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
       </div></td></tr>`;
   }
 
@@ -334,7 +389,7 @@ export function buildBrief({ companies, history, asOf, today }) {
                 color:${C.gold};">BM Ventures</div>
     <div style="font-size:22px;font-weight:700;color:#fff;margin-top:5px;">Portfolio Brief</div>
     <div style="font-size:12.5px;color:rgba(255,255,255,.82);margin-top:3px;">
-      ${esc(longDate(now))}${asOf ? ` · tracker as of ${esc(asOf)}` : ''}</div>
+      ${esc(longDate(now))}${lastEdited ? ` · last edited ${esc(lastEdited)}` : ''}</div>
   </td></tr>
 
   <tr><td style="padding:22px 28px 4px;">
@@ -358,7 +413,7 @@ export function buildBrief({ companies, history, asOf, today }) {
         : `${moved.length} entr${moved.length === 1 ? 'y' : 'ies'} logged`)}
   <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table></td></tr>
 
-  ${section('Desks', 'Grouped by who holds the ball, not by who owns the relationship')}
+  ${section('Your morning', 'What each person is holding, where it stands, and what to do about it')}
   ${DESKS.map(deskBlock).join('')}
 
   ${section('Clocks', 'Past maturity, and reviews due inside seven days')}
@@ -402,8 +457,7 @@ export async function loadTracker(url, key) {
     fetchTable(url, key, 'history', 'select=*&order=entry_date.desc&limit=400'),
     fetchTable(url, key, 'settings', 'select=*'),
   ]);
-  const asOf = (settings.find(s => s.key === 'asOf') || {}).value;
-  return { companies, history, asOf: typeof asOf === 'string' ? asOf : '' };
+  return { companies, history };
 }
 
 /* ---------- handler ---------- */

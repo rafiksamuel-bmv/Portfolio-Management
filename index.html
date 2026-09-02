@@ -331,6 +331,12 @@
   .toasts{ position:fixed; bottom:16px; right:16px; display:flex; flex-direction:column; gap:8px; z-index:90; }
   .toast{ background:var(--ink); color:var(--page); padding:10px 16px; border-radius:8px; font-size:12.5px;
     box-shadow:var(--shadow); max-width:340px; }
+  .undochip{ display:inline-flex; align-items:center; gap:6px; background:rgba(255,255,255,.14);
+    border:1px solid rgba(255,255,255,.34); color:#fff; border-radius:999px; padding:4px 12px;
+    font-size:11.5px; font-weight:600; cursor:pointer; max-width:230px; }
+  .undochip:hover{ background:rgba(255,255,255,.24); }
+  .undochip svg{ flex:none; }
+  .undochip span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .toast.has-undo{ display:flex; align-items:center; gap:14px; justify-content:space-between; }
   .toast .undo{ border:1px solid rgba(255,255,255,.4); background:none; color:inherit;
     font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:6px; cursor:pointer;
@@ -366,6 +372,7 @@
     <div class="mh-right">
       <button class="savechip" id="saveChip" type="button" title="Check for changes from other people now"><span class="savedot"></span><span id="saveTxt">live</span></button>
       <button class="newver" id="newVer" type="button" hidden>New changes · load</button>
+      <button class="undochip" id="undoBtn" type="button" hidden title="Undo"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg><span id="undoTxt">Undo</span></button>
       <button class="bell" id="bellBtn" type="button" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span class="badge" id="bellBadge" hidden>0</span></button>
       <div class="seat-chip"><span class="role" id="seatRole">&mdash;</span><button id="signOut" type="button">Sign out</button></div>
     </div>
@@ -377,7 +384,6 @@
     <h1>Portfolio Management <span class="thin">Dashboard</span></h1>
     <div class="meta">
       <span>Legal, Investment &amp; Value Creation</span><span>·</span>
-      <span id="asOf"></span><span>·</span>
       <span id="lastEdit"></span>
     </div>
     <div class="tabs" id="tabs">
@@ -807,6 +813,7 @@
       state.messages  = res[2].data.map(function(m){
         return {id:m.id, ts:m.created_at, seat:m.seat, companyId:m.company_id, text:m.body}; });
       var kv={}; res[3].data.forEach(function(r){ kv[r.key]=r.value; });
+      state.rawSettings=kv;
       if(kv.lists) state.lists=kv.lists;
       if(kv.fx!=null) state.meta.fx=kv.fx;
       if(kv.asOf) state.meta.asOf=kv.asOf;
@@ -829,14 +836,69 @@
   }
 
   function afterWrite(err, what){
-    if(err){ toast("Could not save: "+err.message,"bad"); loadAll(); return false; }
+    if(err){
+      /* history_dedupe is a unique index on (date, company, md5(entry)). It
+         exists so the seed can be re-run safely, but a person meets it as a
+         cryptic Postgres string, so say what it actually means. */
+      var msg = /history_dedupe/.test(err.message||"")
+        ? "That company already has an identical entry on that date. Change the wording or the date, or delete the other one."
+        : "Could not save: "+err.message;
+      toast(msg,"bad"); loadAll(); return false;
+    }
     return true;
   }
   function busy(on){ setSaving(on); }
 
+  /* ---------- undo ----------
+     Every write records how to reverse itself before it runs. Inserts carry a
+     client-generated id so undo can find the row again without a round trip,
+     and re-inserting after a delete restores the same id rather than a new
+     row that only looks the same. */
+  function uid(){
+    if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,function(c){
+      var r=Math.random()*16|0; return (c==="x"?r:(r&0x3|0x8)).toString(16); });
+  }
+  var undoStack=[], undoing=false, UNDO_MAX=20;
+  function pushUndo(label, fn){
+    if(undoing) return;                    /* undoing must not stack its own inverse */
+    undoStack.push({label:label, fn:fn});
+    if(undoStack.length>UNDO_MAX) undoStack.shift();
+    paintUndo();
+  }
+  function paintUndo(){
+    var b=$("undoBtn"); if(!b) return;
+    var top=undoStack[undoStack.length-1];
+    b.hidden=!top || readOnly;
+    if(top){
+      b.title="Undo: "+top.label;
+      var t=$("undoTxt"); if(t) t.textContent=top.label.length>26?top.label.slice(0,26)+"…":top.label;
+    }
+  }
+  function doUndo(){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    var last=undoStack.pop();
+    if(!last){ toast("Nothing to undo."); return; }
+    paintUndo();
+    undoing=true;
+    try{ last.fn(); } finally { undoing=false; }
+    toast("Undone: "+last.label);
+  }
+
   function saveCompany(id, patch, localFn, label){
     if(!sb) return;
     var prev=clone(state);
+    var before=state.companies.filter(function(x){ return x.id===id; })[0];
+    if(before){
+      var was={}; Object.keys(patch).forEach(function(k){ was[k]=before[k]; });
+      var co=before.company;
+      pushUndo(label || ("edit to "+co), function(){
+        saveCompany(id, was, function(st){
+          var t=st.companies.filter(function(x){ return x.id===id; })[0];
+          if(t) Object.keys(was).forEach(function(k){ t[k]=was[k]; });
+        });
+      });
+    }
     localFn(state); render(); busy(true);
     var row=patchToRow(patch); row.updated_by=seat?seat.role:null;
     sb.from("companies").update(row).eq("id",id).then(function(r){
@@ -846,36 +908,76 @@
   }
   function addMessage(companyId, text){
     if(!sb) return;
+    var id=uid();
     busy(true);
-    sb.from("messages").insert({ seat:seat?seat.role:null, author_id:session?session.user.id:null,
-      company_id:companyId, body:text }).then(function(r){
-      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+    sb.from("messages").insert({ id:id, seat:seat?seat.role:null,
+      author_id:session?session.user.id:null, company_id:companyId, body:text }).then(function(r){
+      busy(false);
+      if(r.error) afterWrite(r.error);
+      else { pushUndo("posted update", function(){ removeMessage(id); }); loadAll(); }
+    });
   }
   function removeMessage(id){
     if(!sb) return;
+    var was=state.messages.filter(function(x){ return x.id===id; })[0];
     busy(true);
     sb.from("messages").delete().eq("id",id).then(function(r){
-      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+      busy(false);
+      if(r.error) afterWrite(r.error);
+      else {
+        if(was) pushUndo("deleted update", function(){
+          sb.from("messages").insert({ id:was.id, seat:was.seat, company_id:was.companyId,
+            body:was.text }).then(function(){ loadAll(); });
+        });
+        loadAll();
+      }
+    });
   }
   function addHistory(row){
     if(!sb) return;
+    var id=uid();
     busy(true);
-    sb.from("history").insert({ entry_date:row.date, company:row.company, entry:row.entry,
+    sb.from("history").insert({ id:id, entry_date:row.date, company:row.company, entry:row.entry,
       source:row.source, created_by:seat?seat.role:null }).then(function(r){
-      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+      busy(false);
+      if(r.error) afterWrite(r.error);
+      else {
+        pushUndo("logged "+(row.company||"an entry"), function(){ removeHistory(id); });
+        loadAll();
+      }
+    });
   }
   function updateHistory(id, row){
     if(!sb) return;
+    var was=state.history.filter(function(x){ return x.id===id; })[0];
     busy(true);
     sb.from("history").update({ entry_date:row.date, company:row.company, entry:row.entry,
       source:row.source }).eq("id",id).then(function(r){
-      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+      busy(false);
+      if(r.error) afterWrite(r.error);
+      else {
+        if(was) pushUndo("edited a history entry", function(){
+          updateHistory(id, {date:was.date, company:was.company, entry:was.entry, source:was.source});
+        });
+        loadAll();
+      }
+    });
   }
   function removeHistory(id){
     if(!sb) return;
+    var was=state.history.filter(function(x){ return x.id===id; })[0];
     busy(true);
     sb.from("history").delete().eq("id",id).then(function(r){
-      busy(false); if(r.error) afterWrite(r.error); else loadAll(); });
+      busy(false);
+      if(r.error) afterWrite(r.error);
+      else {
+        if(was) pushUndo("deleted a history entry", function(){
+          sb.from("history").insert({ id:was.id, entry_date:was.date, company:was.company,
+            entry:was.entry, source:was.source }).then(function(){ loadAll(); });
+        });
+        loadAll();
+      }
+    });
   }
   function openHistModal(opts){
     if(readOnly){ toast("Read only view.","warn"); return; }
@@ -904,6 +1006,11 @@
   function saveSetting(key, value, localFn){
     if(!sb) return;
     var prev=clone(state);
+    var wasVal=(state.rawSettings||{})[key];
+    if(wasVal!==undefined) pushUndo("changed "+key, function(){
+      saveSetting(key, wasVal, function(st){ st.rawSettings[key]=wasVal; });
+      setTimeout(loadAll, 300);          /* the setting drives several derived views */
+    });
     if(localFn){ localFn(state); render(); }
     busy(true);
     sb.from("settings").upsert({ key:key, value:value }).then(function(r){
@@ -1850,7 +1957,7 @@
     var blob=buildXlsx([
       {name:"Portfolio Tracker", first:2, xSplit:5, cols:XL_TRACKER_COLS,
        bands:XL_TRACKER_BANDS, rows:rows, title:"Portfolio Tracker",
-       sub:"Legal, Investment & Value Creation  |  As of "+state.meta.asOf+"  |  "+
+       sub:"Legal, Investment & Value Creation  |  "+
          rows.length+" portfolio item"+(rows.length===1?"":"s")+
          (rows.length!==state.companies.length?" (filtered from "+state.companies.length+")":"")+
          "  |  Exported "+dmy(today())},
@@ -1888,7 +1995,6 @@
     if(cur) el.value=cur;
   }
   function render(){
-    $("asOf").textContent="As of "+state.meta.asOf;
     $("seatRole").textContent=seat?seat.role:"—";
     var m=state.meta;
     $("lastEdit").textContent=m.lastUpdatedAt
@@ -1905,6 +2011,7 @@
     $("nTracker").textContent=String(state.companies.length);
     $("nHistory").textContent=String(state.history.length);
     $("nUpdates").textContent=String(state.messages.length);
+    paintUndo();
     if(tab==="dashboard") renderDashboard();
     if(tab==="tracker") renderTracker();
     if(tab==="updates") renderUpdates();
@@ -2008,6 +2115,7 @@
     $("authGo").addEventListener("click", signIn);
     $("authPass").addEventListener("keydown", function(e){ if(e.key==="Enter") signIn(); });
     $("authEmail").addEventListener("keydown", function(e){ if(e.key==="Enter") $("authPass").focus(); });
+    $("undoBtn").addEventListener("click", doUndo);
     $("signOut").addEventListener("click", function(){ if(sb) sb.auth.signOut(); });
 
     $("saveChip").addEventListener("click",function(){ loadAll().then(function(){ toast("Reloaded."); }); });
@@ -2024,6 +2132,10 @@
     });
 
     document.addEventListener("keydown",function(e){
+      if((e.metaKey||e.ctrlKey) && (e.key==="z"||e.key==="Z") && !e.shiftKey
+         && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName||""))){
+        e.preventDefault(); doUndo(); return;
+      }
       if(e.key==="Escape"){
         var open=["confirmModal","notiModal","histModal"].filter(function(id){ return !$(id).hidden; });
         if(open.length){ $(open[0]).hidden=true; return; }
