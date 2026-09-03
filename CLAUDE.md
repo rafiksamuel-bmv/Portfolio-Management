@@ -49,17 +49,11 @@ installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
 - The brief is organised by **person**, not by company: one block each for Mina,
-  Rafik and Reem. Each company under a desk carries where it stands (newest
-  history entry, dated), what to do (that person's action lines), and what
-  closing it looks like (`closure`) — so nobody has to read another section to
-  know their morning. How a company reaches a desk is set out below.
+  Rafik and Reem. Each row carries the company, how late it is, that person's
+  action lines, and the status with its due date. How a company reaches a desk
+  is set out below.
 - The header shows the newest `updated_at` across the tracker. There is no
   `asOf` setting any more: it was maintained by hand and went stale.
-- Each company gets a timeline: its last three history entries dated, then the
-  **NEXT** node (first bullet of `next_action` plus the due date), then the
-  **CLOSE** node (`closure`). `closure` is the only field written for the brief
-  rather than the app — it says what finishing the position looks like, which
-  `next_action` never captured.
 - The activity window is **three days**, not one, and falls back to the five
   most recent entries when nothing is in the window. A 24-hour window went
   blank on a quiet day, which is when the reader most needs the context.
