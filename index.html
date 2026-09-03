@@ -226,6 +226,10 @@
     padding:5px 7px; border-radius:7px; border:1px solid transparent; }
   .todo-item:hover{ background:var(--raised); border-color:var(--border); }
   .todo-item input{ margin:2px 0 0; flex:none; accent-color:var(--maroon); cursor:pointer; }
+  .todo-item .who{ flex:none; font-size:10px; font-weight:700; letter-spacing:.03em;
+    background:var(--blush-2); color:var(--maroon); border-radius:5px; padding:1px 6px;
+    margin-top:1px; }
+  .todo-item .who.none{ background:var(--mute-bg); color:var(--mute); font-weight:400; }
   .todo-item input:disabled{ cursor:default; }
   .kv{ display:flex; justify-content:space-between; gap:12px; font-size:12.5px; padding:4px 0;
     border-bottom:1px dotted var(--border-strong); }
@@ -1434,7 +1438,10 @@
         (lastH?esc(dmy(lastH.date)):"the last entry")+'?"></textarea></div>'+
       '<div><label>Dated</label><input data-f="sitDate" value="'+esc(today())+'" placeholder="YYYY-MM-DD"></div>'+
       '<div><label>Source</label><input data-f="sitSource" value="" placeholder="Email, Counsel opinion…"></div>'+
-      '<div class="full"><label>Next action</label><textarea data-f="nextAction">'+esc(c.nextAction)+'</textarea></div>'+
+      '<div class="full"><label>Next action '+
+        '<span class="hint-inline">one per line; start a line with '+
+        'Mina: / Rafik: / Reem: to say whose it is, or Reem, Rafik: for both</span></label>'+
+        '<textarea data-f="nextAction">'+esc(c.nextAction)+'</textarea></div>'+
       '<div class="full"><label>Strategic closure '+
         '<span class="hint-inline">what "done" looks like for this position</span></label>'+
         '<textarea data-f="closure" placeholder="e.g. Convert at the cap, or settle at 1x and close the file.">'+esc(c.closure)+'</textarea></div>'+
@@ -1543,6 +1550,23 @@
     return String(c.nextAction||"").split("\n")
       .map(function(l){ return l.trim(); }).filter(Boolean);
   }
+  /* An action line may name who owns it: "Mina: draft the notice", or
+     "Reem, Rafik: decide the follow-on". Only a prefix made entirely of known
+     names counts, so "Note: ..." and "Follow up ... on 23 August: statements"
+     are left alone. The brief reads the same tags to build its desks. */
+  var PEOPLE=["Mina","Rafik","Reem"];
+  function parseAction(line){
+    var t=String(line).replace(/^[\u2022\-]\s*/,"").trim();
+    var m=/^([^:]{1,60}):\s*(.+)$/.exec(t);
+    if(m){
+      var raw=m[1].split(/,|&|\band\b/).map(function(x){ return x.trim(); }).filter(Boolean);
+      var named=raw.map(function(x){
+        return PEOPLE.filter(function(p){ return p.toLowerCase()===x.toLowerCase(); })[0];
+      }).filter(Boolean);
+      if(named.length && named.length===raw.length) return {owners:named, text:m[2].trim()};
+    }
+    return {owners:[], text:t};
+  }
   function doneBlock(c){
     var done=doneRecent(c);
     if(!done.length) return "";
@@ -1555,15 +1579,20 @@
     var lines=actionLines(c);
     if(!lines.length) return '<div class="bullets">\u2014</div>';
     return '<div class="todo">'+lines.map(function(l,i){
+      var a=parseAction(l);
+      var who=a.owners.length
+        ? a.owners.map(function(o){ return '<span class="who">'+esc(o)+'</span>'; }).join("")
+        : '<span class="who none" title="Falls to '+esc(c.owner||"the company owner")+
+          '">'+esc(c.owner||"?")+'</span>';
       return '<label class="todo-item"><input type="checkbox" data-done="'+i+'"'+
-        (readOnly?' disabled':'')+'><span>'+esc(l.replace(/^[\u2022\-]\s*/,""))+'</span></label>';
+        (readOnly?' disabled':'')+'>'+who+'<span>'+esc(a.text)+'</span></label>';
     }).join("")+'</div>';
   }
   function completeAction(c, idx){
     if(readOnly){ toast("Read only view.","warn"); return; }
     var lines=actionLines(c), line=lines[idx];
     if(!line) return;
-    var text=line.replace(/^[\u2022\-]\s*/,"");
+    var text=parseAction(line).text;
     var rest=lines.filter(function(_,i){ return i!==idx; }).join("\n");
     var was=c.nextAction, stamp=today();
     addHistory({date:stamp, company:c.company, entry:"Completed: "+text, source:DONE_SRC},

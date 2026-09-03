@@ -63,7 +63,18 @@ output can be rendered and checked without sending anything.
 - The activity window is **three days**, not one, and falls back to the five
   most recent entries when nothing is in the window. A 24-hour window went
   blank on a quiet day, which is when the reader most needs the context.
-- **Desks come from `owner`, not from `status`.** The two answer different
+- **A desk is built from two things.** *Your move* is the `next_action` lines
+  tagged to that person — a line may begin `Mina:`, `Rafik:`, `Reem:` or
+  `Reem, Rafik:`, parsed by `parseAction()`, and only a prefix made entirely of
+  known names counts so ordinary text like `Note:` survives. An untagged line
+  falls to the company's `owner`. *Chasing* is the channel each person runs:
+  **Pending company is Rafik's, Pending legal is Mina's**, shown as "with the
+  companies" / "with counsel" and only when that company has no line tagged to
+  them already. One company can therefore sit on several desks with different
+  work, which is the point — Mina approves Flend's extension notice while Reem
+  and Rafik decide the follow-on. Anything reaching no desk appears under
+  **Unassigned**.
+- Older note, superseded above: **desks came from `owner`, not `status`.** The two answer different
   questions and are independent. `status` is who holds the ball — us, counsel,
   or the company. `owner` is which of the three has to move it, and so whose
   desk it lands on. "Pending legal" means it has actually gone to Shawarby;

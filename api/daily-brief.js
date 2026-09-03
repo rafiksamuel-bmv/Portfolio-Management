@@ -26,12 +26,22 @@ const DEFAULT_TO = 'rafiksamuel@aucegypt.edu';
    is which of us has to move it. They are independent -- an item Reem has
    asked Mina to send to Shawarby is "Pending our action" sitting on Mina's
    desk, which a status-derived desk could not express. */
+/* A desk is built from two things.
+     Your move  -- the next-action lines tagged to that person, whatever the
+                   company's status. An untagged line falls to the company's
+                   owner, so nothing goes unassigned.
+     Chasing    -- the channel each person runs: anything Pending company is
+                   Rafik's to chase, anything Pending legal is Mina's. Listed
+                   only when that company has no action tagged to them already.
+   So one company can sit on two desks with different work, which is the whole
+   point: Mina approves Flend's extension notice while Reem and Rafik decide
+   the follow-on. */
 const DESKS = [
-  { who: 'Mina',  role: 'counsel liaison',
-    lead: 'Everything that goes to or comes back from El-Shawarby.' },
-  { who: 'Rafik', role: 'company outreach',
-    lead: 'Everything that goes to or comes back from the companies.' },
-  { who: 'Reem',  role: 'decisions & Mr. Mohamed',
+  { who: 'Mina',  role: 'counsel liaison', chases: 'Pending legal',
+    lead: 'Work tagged to Mina, and everything sitting with El-Shawarby.' },
+  { who: 'Rafik', role: 'company outreach', chases: 'Pending company',
+    lead: 'Work tagged to Rafik, and everything sitting with the companies.' },
+  { who: 'Reem',  role: 'decisions & Mr. Mohamed', chases: null,
     lead: 'Calls to make, and anything that needs Mr. Mohamed.' },
 ];
 
@@ -108,6 +118,29 @@ function doneRecent(history, c, n) {
 function toLines(text) {
   return String(text || '').split('\n')
     .map(l => l.replace(/^[•\-]\s*/, '').trim()).filter(Boolean);
+}
+
+const PEOPLE = ['Mina', 'Rafik', 'Reem'];
+/* An action line may name who owns it: "Mina: draft the notice", or
+   "Reem, Rafik: decide the follow-on". Only a prefix made entirely of known
+   names counts, so ordinary text like "Note: ..." or "Confirm dilution: ..."
+   is left alone rather than being eaten as an owner. */
+function parseAction(line) {
+  const m = /^([^:]{1,60}):\s*(.+)$/.exec(String(line).trim());
+  if (m) {
+    const raw = m[1].split(/,|&|\band\b/).map(x => x.trim()).filter(Boolean);
+    const named = raw.map(x => PEOPLE.find(p => p.toLowerCase() === x.toLowerCase()))
+                     .filter(Boolean);
+    if (named.length && named.length === raw.length) {
+      return { owners: named, text: m[2].trim() };
+    }
+  }
+  return { owners: [], text: String(line).trim() };
+}
+/* Who has to do this line: its own tag, else the company's owner. */
+function actionOwners(line, company) {
+  const a = parseAction(line);
+  return a.owners.length ? a.owners : [(company.owner || '').trim()].filter(Boolean);
 }
 
 function esc(s) {
@@ -297,12 +330,12 @@ export function buildBrief({ companies, history, today }) {
                   color:${C.faint};">${right}</td>` : ''}
      </tr></table>`;
 
-  function deskItem(c) {
+  function deskItem(c, onlyActions) {
     const od = overdueLabel(now, c);
     const due = daysFrom(now, c.due);
     const hot = due !== null && due <= 7;
     const last = latestEntry(history, c);
-    const actions = toLines(c.next_action);
+    const actions = onlyActions || toLines(c.next_action).map(l => parseAction(l).text);
     const closure = toLines(c.closure);
     const [fg, bg] = statusTone(c.status);
 
@@ -362,6 +395,23 @@ export function buildBrief({ companies, history, today }) {
     </td></tr>`;
   }
 
+  /* One place that decides what lands on a desk, so the email and the PDF
+     cannot drift apart. */
+  function deskRows(desk) {
+    const mine = [];
+    byNum.forEach(c => {
+      const acts = toLines(c.next_action)
+        .map(l => ({ text: parseAction(l).text, owners: actionOwners(l, c) }))
+        .filter(a => a.owners.indexOf(desk.who) > -1);
+      if (acts.length) mine.push({ c, acts: acts.map(a => a.text) });
+    });
+    const has = {}; mine.forEach(m => { has[m.c.company] = 1; });
+    const chasing = desk.chases
+      ? byNum.filter(c => c.status === desk.chases && !has[c.company])
+      : [];
+    return { mine, chasing };
+  }
+
   /* Parked with counsel or the company: on this person's desk, but not their
      move today. Kept short so it cannot be confused with work to do. */
   function waitingRow(c) {
@@ -379,7 +429,8 @@ export function buildBrief({ companies, history, today }) {
   }
 
   function deskBlock(desk) {
-    const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
+    const { mine, chasing } = deskRows(desk);
+    const rows = mine.map(m => m.c).concat(chasing);
     const head = `
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="font-size:17px;font-weight:700;color:${C.ink};letter-spacing:-.01em;">
@@ -387,16 +438,13 @@ export function buildBrief({ companies, history, today }) {
           <span style="font-weight:400;color:${C.faint};font-size:12.5px;">
             · ${esc(desk.role)}</span></td>
         <td align="right">${(() => {
-          const act = rows.filter(c => c.status === 'Pending our action').length;
+          const act = mine.length;
           return act ? pill(act + ' to act', C.crit, C.critBg)
-                     : pill(rows.length ? 'waiting' : 'clear', C.ok, C.okBg);
+                     : pill(chasing.length ? 'chasing only' : 'clear', C.ok, C.okBg);
         })()}</td>
       </tr></table>
       <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>`;
 
-
-    const mine    = rows.filter(c => c.status === 'Pending our action');
-    const waiting = rows.filter(c => c.status !== 'Pending our action');
 
     const subhead = (text, colour) =>
       `<tr><td style="padding:13px 0 2px;">
@@ -409,13 +457,15 @@ export function buildBrief({ companies, history, today }) {
           ${head}</div>
         <table width="100%" cellpadding="0" cellspacing="0" style="padding:0 18px 6px;">
           ${mine.length
-            ? subhead(`YOUR MOVE · ${mine.length}`, C.bright) + mine.map(deskItem).join('')
+            ? subhead(`YOUR MOVE · ${mine.length}`, C.bright)
+              + mine.map(m => deskItem(m.c, m.acts)).join('')
             : subhead('YOUR MOVE · NONE', C.faint)
               + `<tr><td style="padding:8px 0 2px;font-size:12.5px;color:${C.faint};">
                    Nothing is waiting on ${esc(desk.who)} right now.</td></tr>`}
-          ${waiting.length
-            ? subhead(`WAITING ON OTHERS · ${waiting.length}`, C.faint)
-              + waiting.map(waitingRow).join('')
+          ${chasing.length
+            ? subhead(`${desk.who === 'Mina' ? 'WITH COUNSEL' : 'WITH THE COMPANIES'}`
+                      + ` · ${chasing.length}`, C.faint)
+              + chasing.map(waitingRow).join('')
             : ''}
         </table>
       </div></td></tr>`;
@@ -424,8 +474,13 @@ export function buildBrief({ companies, history, today }) {
   /* Nothing should fall off the brief because its owner is blank or is
      somebody other than the three desks. */
   function orphanBlock() {
-    const named = DESKS.map(d => d.who);
-    const rows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+    const seen = {};
+    DESKS.forEach(d => {
+      const r = deskRows(d);
+      r.mine.forEach(m => { seen[m.c.company] = 1; });
+      r.chasing.forEach(c => { seen[c.company] = 1; });
+    });
+    const rows = byNum.filter(c => !seen[c.company]);
     if (!rows.length) return '';
     return `<tr><td style="padding:0 28px 16px;">
       <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
@@ -436,7 +491,8 @@ export function buildBrief({ companies, history, today }) {
                                      C.warn, C.warnBg)}</td>
           </tr></table>
           <div style="font-size:12px;color:${C.faint};margin-top:4px;">
-            No owner set, so nobody is holding these. Set an owner in the tracker.</div>
+            These reached no desk: no action is tagged to anyone and the status
+            does not put them with counsel or a company.</div>
         </div>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
@@ -585,15 +641,23 @@ export function buildBrief({ companies, history, today }) {
     };
   };
   const pdfDesks = DESKS.map(desk => {
-    const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
+    const { mine, chasing } = deskRows(desk);
     return {
       who: desk.who, role: desk.role,
-      mine:    rows.filter(c => c.status === 'Pending our action').map(forCompany),
-      waiting: rows.filter(c => c.status !== 'Pending our action').map(forCompany),
+      chaseLabel: desk.who === 'Mina' ? 'With counsel'
+                : desk.who === 'Rafik' ? 'With the companies' : 'Waiting',
+      mine:    mine.map(m => ({ ...forCompany(m.c), actions: m.acts })),
+      waiting: chasing.map(forCompany),
     };
   });
-  const named = DESKS.map(d => d.who);
-  const orphanRows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+  /* Anything that reached no desk at all still has to be visible. */
+  const onADesk = {};
+  DESKS.forEach(d => {
+    const { mine, chasing } = deskRows(d);
+    mine.forEach(m => { onADesk[m.c.company] = 1; });
+    chasing.forEach(c => { onADesk[c.company] = 1; });
+  });
+  const orphanRows = byNum.filter(c => !onADesk[c.company]);
   /* An executive summary earns its space only if it says what the reader would
      otherwise have to assemble: the exposure, what is late, and who owes what.
      All three fall out of data already gathered above. */
@@ -619,9 +683,9 @@ export function buildBrief({ companies, history, today }) {
           : x.d === 0 ? 'today' : x.d + 'd'})`).join(', ') + '.'
       : 'Nothing falls due in the next seven days.'],
     ['Desks', DESKS.map(dk => {
-        const n = byNum.filter(c => (c.owner || '').trim() === dk.who
-                                 && c.status === 'Pending our action').length;
-        return `${dk.who} ${n ? n + ' to act' : 'clear'}`;
+        const { mine, chasing } = deskRows(dk);
+        return `${dk.who} ${mine.length ? mine.length + ' to act'
+                : chasing.length ? 'chasing only' : 'clear'}`;
       }).join(', ') + '.'],
   ];
 
@@ -629,9 +693,8 @@ export function buildBrief({ companies, history, today }) {
     now, lastEdited, topline, greeting: greeting(now), stats, summary,
     desks: pdfDesks,
     orphans: orphanRows.length
-      ? { who: 'Unassigned', role: 'no owner set',
-          mine: orphanRows.filter(c => c.status === 'Pending our action').map(forCompany),
-          waiting: orphanRows.filter(c => c.status !== 'Pending our action').map(forCompany) }
+      ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
+          mine: [], waiting: orphanRows.map(forCompany) }
       : null,
     moved: moved.map(h => ({
       company: h.company || 'General',
@@ -900,7 +963,8 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
              : `Nothing needs ${desk.who}'s action today.`)
       + (desk.waiting.length
         ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} with `
-          + 'counsel or a company; those are listed after, for awareness rather than action.'
+          + `${desk.who === 'Mina' ? 'counsel' : 'the companies'}, listed after -- `
+          + 'nothing to do unless they go quiet.'
         : ''));
 
     d.textAt(act ? 'YOUR MOVE - ' + act : 'YOUR MOVE - NONE', d.margin, d.y,
@@ -913,7 +977,8 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
     if (desk.waiting.length) {
       d.y += 8;
       d.keepTogether(() => {
-        d.textAt('WAITING ON OTHERS - ' + desk.waiting.length, d.margin, d.y,
+        d.textAt((desk.chaseLabel || 'Waiting').toUpperCase() + ' - ' + desk.waiting.length,
+                 d.margin, d.y,
                  { size: 7, bold: true, colour: P.faint });
         d.y += 12;
       });
