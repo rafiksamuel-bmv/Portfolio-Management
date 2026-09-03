@@ -594,8 +594,39 @@ export function buildBrief({ companies, history, today }) {
   });
   const named = DESKS.map(d => d.who);
   const orphanRows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+  /* An executive summary earns its space only if it says what the reader would
+     otherwise have to assemble: the exposure, what is late, and who owes what.
+     All three fall out of data already gathered above. */
+  const noExt = overdue.filter(c => !c.extended_to);
+  const lateOrDue = byNum
+    .map(c => ({ c, d: daysFrom(now, c.due) }))
+    .filter(x => x.d !== null && x.d <= 7)
+    .sort((a, b) => a.d - b.d);
+  const exposure = ccy => byNum
+    .filter(c => c.ccy === ccy && overdueDays(now, c) !== null && !c.extended_to)
+    .reduce((n, c) => n + (Number(c.invested) || 0), 0);
+  const summary = [
+    ['Position', topline],
+    ['Past maturity', noExt.length
+      ? `${noExt.length} of ${byNum.length} notes sit past maturity with no signed extension`
+        + `${exposure('USD') ? `, USD ${money(exposure('USD'))} of principal` : ''}`
+        + `${exposure('EGP') ? ` and EGP ${money(exposure('EGP'))}` : ''}`
+        + `. ${noExt.slice(0, 5).map(c => c.company).join(', ')}`
+        + `${noExt.length > 5 ? ' and others' : ''}.`
+      : 'Every note is either within term or covered by a signed extension.'],
+    ['Due inside a week', lateOrDue.length
+      ? lateOrDue.slice(0, 5).map(x => `${x.c.company} (${x.d < 0 ? Math.abs(x.d) + 'd late'
+          : x.d === 0 ? 'today' : x.d + 'd'})`).join(', ') + '.'
+      : 'Nothing falls due in the next seven days.'],
+    ['Desks', DESKS.map(dk => {
+        const n = byNum.filter(c => (c.owner || '').trim() === dk.who
+                                 && c.status === 'Pending our action').length;
+        return `${dk.who} ${n ? n + ' to act' : 'clear'}`;
+      }).join(', ') + '.'],
+  ];
+
   const pdfData = {
-    now, lastEdited, topline, greeting: greeting(now), stats,
+    now, lastEdited, topline, greeting: greeting(now), stats, summary,
     desks: pdfDesks,
     orphans: orphanRows.length
       ? { who: 'Unassigned', role: 'no owner set',
@@ -739,7 +770,8 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, moved, orphans }) {
+export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
+                           desks, moved, orphans }) {
   const P = {
     page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
     ink: '#EDE5E6', mid: '#B0A2A4', faint: '#867779',
@@ -754,8 +786,22 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
 
   const d = new Doc({ margin: 44, background: P.page });
   const R = d.margin + d.innerWidth;
+  let started = false;
 
-  /* masthead */
+  /* Every section opens the same way, on its own page: a rule, its name, and a
+     line or two saying what it is for, so the document explains itself to
+     someone reading it for the first time. */
+  const section = (title, blurb, opts = {}) => {
+    if (started && opts.newPage !== false) d.newPage();
+    started = true;
+    d.rect(d.margin, d.y, d.innerWidth, 2, P.maroon);
+    d.y += 12;
+    d.textAt(title.toUpperCase(), d.margin, d.y, { size: 10, bold: true, colour: P.gold });
+    d.y += 15;
+    d.para(blurb, { size: 8.5, colour: P.faint, after: 12 });
+  };
+
+  /* --------------------------------------------------------- page 1 ---- */
   d.rect(0, 0, d.w, 116, P.deep);
   d.rect(0, 114, d.w, 2, P.maroon);
   d.y = 26;
@@ -768,48 +814,51 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
   d.textAt('Prepared by Rafik for internal review'
            + (lastEdited ? '  -  tracker last edited ' + lastEdited : ''),
            d.margin, d.y, { size: 8, colour: P.gold });
-  d.y = 140;
+  d.y = 142;
 
-  d.para(greeting, { size: 10, colour: P.mid, after: 8 });
-  d.para(topline, { size: 12.5, bold: true, colour: P.ink, after: 14 });
+  d.para(greeting, { size: 10, colour: P.mid, after: 16 });
 
-  /* counts, evenly across the width */
+  section('Executive summary',
+    'The position in one view: what the portfolio looks like this morning, what is '
+  + 'past its maturity date, what falls due inside the week, and who is holding '
+  + 'work. Everything after this section is the detail behind it.',
+    { newPage: false });
+
+  (summary || []).forEach(([label, text]) => d.keepTogether(() => {
+    d.textAt(label.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.faint });
+    d.y += 11;
+    d.para(text, { size: 10, colour: P.ink, after: 11 });
+  }));
+
+  d.y += 4;
   const colW = d.innerWidth / stats.length;
-  d.room(42);
-  stats.forEach(([label, value, colour], i) => {
-    const x = d.margin + colW * i;
-    d.rect(x, d.y, colW - 6, 40, P.card);
-    d.textAt(value, x + 10, d.y + 8,  { size: 15, bold: true, colour });
-    d.textAt(label.toUpperCase(), x + 10, d.y + 27, { size: 6.5, bold: true, colour: P.faint });
+  d.keepTogether(() => {
+    stats.forEach(([label, value, colour], i) => {
+      const x = d.margin + colW * i;
+      d.rect(x, d.y, colW - 6, 40, P.card);
+      d.textAt(value, x + 10, d.y + 8,  { size: 15, bold: true, colour });
+      d.textAt(label.toUpperCase(), x + 10, d.y + 27, { size: 6.5, bold: true, colour: P.faint });
+    });
+    d.y += 46;
   });
-  d.y += 52;
 
-  const heading = (text, sub) => {
-    d.room(40);
-    d.textAt(text.toUpperCase(), d.margin, d.y, { size: 9, bold: true, colour: P.crit });
-    d.y += 13;
-    if (sub) { d.para(sub, { size: 8.5, colour: P.faint }); }
-    d.y += 3;
-  };
-
+  /* ----------------------------------------------------- the desks ---- */
   const companyBlock = (c, compact) => {
     const [fg, bg] = tone(c.status);
-    d.room(compact ? 44 : 96);
     d.rule(P.line, { after: 9 });
     d.chip(c.status || '-', d.y - 1, R, fg, bg);
     d.textAt(c.company, d.margin, d.y, { size: compact ? 10.5 : 12, bold: true,
                                          colour: compact ? P.mid : P.ink });
     d.y += compact ? 15 : 17;
-    if (!compact) {
-      d.para(c.meta, { size: 7.5, colour: c.overdue ? P.crit : P.faint, after: 5 });
-    }
+    if (!compact) d.para(c.meta, { size: 7.5, colour: c.overdue ? P.crit : P.faint, after: 5 });
     if (c.stands) {
       if (!compact) {
         d.textAt('WHERE IT STANDS', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
         if (c.standsWhen) d.textRight(c.standsWhen, R, d.y, { size: 6.8, colour: P.faint });
         d.y += 10;
       }
-      d.para(c.stands, { size: compact ? 8.5 : 9.5, colour: compact ? P.faint : P.mid, after: compact ? 4 : 7 });
+      d.para(c.stands, { size: compact ? 8.5 : 9.5, colour: compact ? P.faint : P.mid,
+                         after: compact ? 4 : 7 });
     }
     if (compact) return;
     if (c.ask) {
@@ -818,21 +867,18 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
       d.para(c.ask, { size: 9, colour: P.mid, after: 7 });
     }
     d.textAt('WHAT TO DO', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
-    if (c.due) d.textRight(c.due, R, d.y, { size: 6.8, colour: c.dueHot ? P.crit : P.faint, bold: c.dueHot });
+    if (c.due) d.textRight(c.due, R, d.y, { size: 6.8, colour: c.dueHot ? P.crit : P.faint,
+                                            bold: c.dueHot });
     d.y += 11;
     if (c.actions.length) {
       c.actions.forEach(a => {
-        d.room(14);
         d.textAt('>', d.margin, d.y, { size: 9.5, bold: true, colour: P.gold });
         d.para(a, { size: 9.5, bold: true, colour: P.ink, indent: 12, after: 2 });
       });
       d.y += 4;
-    } else {
-      d.para('No next action recorded.', { size: 9.5, colour: P.faint, after: 6 });
-    }
+    } else d.para('No next action recorded.', { size: 9.5, colour: P.faint, after: 6 });
     if (c.done.length) {
       c.done.forEach(t => {
-        d.room(12);
         d.textAt('+', d.margin, d.y, { size: 8.5, bold: true, colour: P.ok });
         d.para(t, { size: 8.5, colour: P.faint, indent: 12, after: 1 });
       });
@@ -846,47 +892,48 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
     d.y += 4;
   };
 
-  heading('Your morning', 'What each person is holding, where it stands, and what to do about it');
   desks.concat(orphans ? [orphans] : []).forEach(desk => {
-    d.room(70);
-    d.y += 6;
-    d.rect(d.margin, d.y, d.innerWidth, 30, P.card);
-    d.textAt(desk.who, d.margin + 11, d.y + 7, { size: 12.5, bold: true, colour: P.ink });
-    d.textAt(desk.role, d.margin + 11 + 8
-             + Math.max(38, desk.who.length * 7.2), d.y + 10, { size: 8, colour: P.faint });
     const act = desk.mine.length;
-    d.chip(act ? act + ' to act' : (desk.waiting.length ? 'waiting' : 'clear'),
-           d.y + 8, R - 11, act ? P.crit : P.ok, act ? P.critBg : P.okBg);
-    d.y += 38;
+    section(desk.who,
+      `${desk.role}. `
+      + (act ? `${act} ${act === 1 ? 'item needs' : 'items need'} ${desk.who}'s action today.`
+             : `Nothing needs ${desk.who}'s action today.`)
+      + (desk.waiting.length
+        ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} with `
+          + 'counsel or a company; those are listed after, for awareness rather than action.'
+        : ''));
 
     d.textAt(act ? 'YOUR MOVE - ' + act : 'YOUR MOVE - NONE', d.margin, d.y,
              { size: 7, bold: true, colour: act ? P.crit : P.faint });
     d.y += 12;
-    if (act) desk.mine.forEach(c => companyBlock(c, false));
+    if (act) desk.mine.forEach(c => d.keepTogether(() => companyBlock(c, false)));
     else d.para('Nothing is waiting on ' + desk.who + ' right now.',
                 { size: 9, colour: P.faint, after: 4 });
 
     if (desk.waiting.length) {
-      d.y += 6;
-      d.textAt('WAITING ON OTHERS - ' + desk.waiting.length, d.margin, d.y,
-               { size: 7, bold: true, colour: P.faint });
-      d.y += 12;
-      desk.waiting.forEach(c => companyBlock(c, true));
+      d.y += 8;
+      d.keepTogether(() => {
+        d.textAt('WAITING ON OTHERS - ' + desk.waiting.length, d.margin, d.y,
+                 { size: 7, bold: true, colour: P.faint });
+        d.y += 12;
+      });
+      desk.waiting.forEach(c => d.keepTogether(() => companyBlock(c, true)));
     }
-    d.y += 10;
   });
 
+  /* -------------------------------------------------- what moved ---- */
   if (moved.length) {
-    d.room(80);
-    heading(moved.length + ' entries logged', 'Moved in the last three days');
-    moved.forEach(m => {
-      d.room(34);
+    section('Moved in the last three days',
+      'Every entry logged across the portfolio in the last three days, newest first, '
+      + `${moved.length} in all. This is the raw record; the desks above are what to `
+      + 'do about it.');
+    moved.forEach(m => d.keepTogether(() => {
       d.rule(P.line, { after: 8 });
       d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
       d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
       d.y += 13;
       d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
-    });
+    }));
   }
 
   return d.toBuffer((doc, page, total) => {

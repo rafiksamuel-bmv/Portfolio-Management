@@ -88,9 +88,16 @@ output can be rendered and checked without sending anything.
   out from `brief.pdfData` rather than converted from the HTML, so the two carry
   the same content without the PDF depending on the markup. If it throws, the
   email still goes and the response says `pdf: failed`.
+- The PDF gives **each section its own page** and opens each with a sentence or
+  two saying what the section is for, so it reads standalone. Page 1 is the
+  masthead and an executive summary computed from the same data (exposure in
+  principal, what falls due inside a week, and each desk's count). Company
+  blocks are placed with `keepTogether()` so none is split across a page.
 - `lib/pdf.js` supplies what PDF itself lacks: Helvetica and Helvetica-Bold
-  character widths, a greedy wrapper, and a cursor that starts a new page when
-  it runs out of room. The document is ASCII only (`ascii()` transliterates), so
+  character widths, a greedy wrapper, a cursor that starts a new page when it
+  runs out of room, and `measure()`/`keepTogether()`, which run a block with
+  output and pagination suppressed to find its height before placing it — so a
+  block can be kept whole without duplicating its layout arithmetic. The document is ASCII only (`ascii()` transliterates), so
   nothing depends on the reader's encoding.
 - `?pdf=1` returns the PDF without sending.
 - It needs the **service role** key, not the anon key: RLS grants only
