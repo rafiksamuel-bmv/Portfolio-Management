@@ -1,4 +1,4 @@
-import { Doc } from '../lib/pdf.js';
+import { Doc, wrap as wrapLines } from '../lib/pdf.js';
 
 /* Daily portfolio brief.
  *
@@ -49,12 +49,9 @@ const DESKS = [
    rather than a report header. Varies by weekday so it does not read canned. */
 function greeting(now) {
   const day = now.getUTCDay();
-  if (day === 0) return 'Good morning. Start of the week — here is where the portfolio stands, '
-    + 'and what each of us is holding.';
-  if (day === 4) return 'Good morning. End of the week — here is where the portfolio stands, '
-    + 'and what is worth closing out before the weekend.';
-  return 'Good morning. Here is where the portfolio stands this morning, '
-    + 'and what each of us is holding today.';
+  if (day === 0) return 'Good morning. Start of the week.';
+  if (day === 4) return 'Good morning. Last working day of the week.';
+  return 'Good morning.';
 }
 
 /* ---------- dates ---------- */
@@ -189,81 +186,6 @@ function pill(text, fg, bg) {
        + `white-space:nowrap;">${esc(text)}</span>`;
 }
 
-/* ---------- per-company timeline ----------
-   Horizontal: each milestone is a column, its top border forming the track.
-   Segmented borders rather than one absolute-positioned line, because email
-   clients do not honour negative margins or absolute positioning. */
-function timeline(c, history, now) {
-  const past = historyFor(history, c).slice(0, 3).reverse();   // oldest first
-  const [fg, bg] = statusTone(c.status);
-  const od = overdueLabel(now, c);
-  const dueIn = daysFrom(now, c.due);
-  const actions = toLines(c.next_action);
-  const closure = toLines(c.closure);
-  const hot = dueIn !== null && dueIn <= 7;
-
-  const nodes = past.map(h => ({
-    label: dmy(h.entry_date),
-    sub: h.source || '',
-    body: String(h.entry).split('\n')[0].replace(/^[•\-]\s*/, ''),
-    color: C.faint, track: C.line, strong: false,
-  }));
-
-  nodes.push({
-    label: 'NEXT',
-    sub: c.due ? (hot ? `${c.due} · ${dueIn < 0 ? Math.abs(dueIn) + 'd late' : dueIn === 0 ? 'today' : 'in ' + dueIn + 'd'}`
-                      : c.due) : 'no date set',
-    body: actions.length ? actions[0] : 'No next action recorded.',
-    extra: actions.length > 1 ? `+${actions.length - 1} more` : '',
-    color: hot ? C.crit : C.warn, track: hot ? C.crit : C.gold, strong: true,
-  });
-
-  nodes.push({
-    label: 'CLOSE',
-    sub: 'what done looks like',
-    body: closure.length ? closure.join(' ') : 'Not defined yet.',
-    color: closure.length ? C.ok : C.faint,
-    track: closure.length ? C.ok : C.line,
-    strong: true, muted: !closure.length,
-  });
-
-  const w = Math.floor(100 / nodes.length);
-  const cells = nodes.map((n, i) => `
-    <td width="${w}%" valign="top" style="padding:0 ${i === nodes.length - 1 ? 0 : 8}px 0 0;">
-      <div style="font-size:10px;font-family:${MONO};font-weight:${n.strong ? '700' : '400'};
-                  color:${n.color};letter-spacing:.04em;white-space:nowrap;
-                  overflow:hidden;text-overflow:ellipsis;">${esc(n.label)}</div>
-      <div style="font-size:9.5px;font-family:${MONO};color:${C.faint};margin:1px 0 6px;
-                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(n.sub)}</div>
-      <div style="border-top:3px solid ${n.track};padding-top:8px;">
-        <div style="font-size:11.5px;line-height:1.45;
-                    color:${n.muted ? C.faint : (n.strong ? C.ink : C.mid)};
-                    font-weight:${n.strong && !n.muted ? '600' : '400'};">${esc(n.body).slice(0, 260)}</div>
-        ${n.extra ? `<div style="font-size:10px;color:${C.faint};margin-top:3px;">${esc(n.extra)}</div>` : ''}
-      </div>
-    </td>`).join('');
-
-  return `<tr><td style="padding:0 28px 14px;">
-    <table width="100%" cellpadding="0" cellspacing="0"
-           style="border:1px solid ${C.line};border-radius:10px;">
-      <tr><td style="padding:13px 16px 11px;">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="font-size:15px;font-weight:700;color:${C.ink};">${esc(c.company)}
-            <span style="font-size:11px;font-weight:400;color:${C.faint};">
-              · ${esc(c.bucket || '')}${c.owner ? ' · ' + esc(c.owner) : ''}</span></td>
-          <td align="right">${pill(c.status || '—', fg, bg)}</td>
-        </tr></table>
-        <div style="font-size:10.5px;font-family:${MONO};color:${C.faint};margin-top:4px;">
-          ${esc(c.next_trigger || 'no trigger set')} ·
-          ${effMaturity(c) ? 'matures ' + esc(dmy(effMaturity(c))) : 'no maturity'}
-          ${od ? ` · <span style="color:${C.crit};font-weight:700;">${esc(od)}</span>` : ''}
-        </div>
-      </td></tr>
-      <tr><td style="padding:2px 16px 15px;">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>${cells}</tr></table>
-      </td></tr>
-    </table></td></tr>`;
-}
 
 /* ============================ the brief ============================ */
 export function buildBrief({ companies, history, today }) {
@@ -330,71 +252,9 @@ export function buildBrief({ companies, history, today }) {
                   color:${C.faint};">${right}</td>` : ''}
      </tr></table>`;
 
-  function deskItem(c, onlyActions) {
-    const od = overdueLabel(now, c);
-    const due = daysFrom(now, c.due);
-    const hot = due !== null && due <= 7;
-    const last = latestEntry(history, c);
-    const actions = onlyActions || toLines(c.next_action).map(l => parseAction(l).text);
-    const closure = toLines(c.closure);
-    const [fg, bg] = statusTone(c.status);
-
-    const dueRight = c.due
-      ? `due ${esc(c.due)}${hot ? ` · <b style="color:${C.crit};">${
-          due < 0 ? Math.abs(due) + ' days late' : due === 0 ? 'today' : due + ' days'}</b>` : ''}`
-      : 'no date set';
-
-    return `<tr><td style="padding:15px 0 17px;border-top:1px solid ${C.line};">
-      <table width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td style="font-size:15px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
-        <td align="right">${pill(c.status || '—', fg, bg)}</td>
-      </tr></table>
-      <div style="font-size:10.5px;font-family:${MONO};color:${C.faint};margin-top:4px;">
-        ${effMaturity(c) ? 'matures ' + esc(dmy(effMaturity(c))) : 'no maturity'}
-        ${od ? ` · <span style="color:${C.crit};font-weight:700;">${esc(od)}</span>` : ''}
-      </div>
-
-      ${label('WHERE IT STANDS', last
-          ? `${esc(dmy(last.entry_date))}${last.source ? ' · ' + esc(last.source) : ''}` : '')}
-      <div style="font-size:13px;line-height:1.55;color:${C.mid};">${
-        last ? esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, ''))
-             : `<span style="color:${C.faint};">Nothing logged yet.</span>`}</div>
-
-      ${(() => {
-        const done = doneRecent(history, c);
-        return done.length
-          ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:7px;">${
-              done.map(h => `<tr>
-                <td width="14" valign="top" style="font-size:12px;color:${C.ok};
-                    font-weight:700;padding:1px 0 0;">&#10003;</td>
-                <td style="font-size:12px;line-height:1.5;color:${C.faint};padding-bottom:3px;">${
-                  esc(String(h.entry).replace(/^Completed:\s*/, ''))}
-                  <span style="font-family:${MONO};font-size:10px;"> · ${esc(dmy(h.entry_date))}</span>
-                </td></tr>`).join('')}</table>`
-          : '';
-      })()}
-
-      ${c.legal_req && c.status === 'Pending legal'
-        ? label('THE ASK') + `<div style="font-size:12.5px;line-height:1.5;color:${C.mid};">${
-            esc(c.legal_req)}</div>` : ''}
-
-      ${label('WHAT TO DO', dueRight)}
-      ${actions.length
-        ? `<table width="100%" cellpadding="0" cellspacing="0">${actions.map(a =>
-            `<tr><td width="14" valign="top" style="font-size:13px;color:${C.gold};
-                     font-weight:700;padding:1px 0 0;">&#9656;</td>
-                 <td style="font-size:13px;line-height:1.55;color:${C.ink};
-                     font-weight:600;padding-bottom:4px;">${esc(a)}</td></tr>`).join('')}
-           </table>`
-        : `<div style="font-size:13px;color:${C.faint};">No next action recorded.</div>`}
-
-      ${closure.length
-        ? label('CLOSING THIS') + `<div style="font-size:12px;line-height:1.5;color:${C.faint};">${
-            esc(closure.join(' '))}</div>`
-        : ''}
-    </td></tr>`;
-  }
-
+  /* A grid row, not a block. Company, where it stands in one line, the actions
+     that are this person's, and the date -- everything else lives in the
+     tracker and was making the brief too long to read at 7am. */
   /* One place that decides what lands on a desk, so the email and the PDF
      cannot drift apart. */
   function deskRows(desk) {
@@ -412,63 +272,73 @@ export function buildBrief({ companies, history, today }) {
     return { mine, chasing };
   }
 
-  /* Parked with counsel or the company: on this person's desk, but not their
-     move today. Kept short so it cannot be confused with work to do. */
-  function waitingRow(c) {
-    const last = latestEntry(history, c);
+  function gridRow(c, actions, i) {
     const [fg, bg] = statusTone(c.status);
-    return `<tr><td style="padding:9px 0;border-top:1px solid ${C.line};">
-      <table width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td style="font-size:13px;font-weight:700;color:${C.mid};">${esc(c.company)}</td>
-        <td align="right">${pill(c.status || '—', fg, bg)}</td>
-      </tr></table>
-      <div style="font-size:12px;color:${C.faint};margin-top:3px;line-height:1.5;">${
-        last ? esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 150)
-             : 'Nothing logged yet.'}</div>
-    </td></tr>`;
+    const last = latestEntry(history, c);
+    const due = daysFrom(now, c.due);
+    const hot = due !== null && due <= 7;
+    const od = overdueDays(now, c);
+    const zebra = i % 2 ? C.soft : 'transparent';
+    return `<tr>
+      <td valign="top" bgcolor="${zebra}" style="padding:9px 10px;border-bottom:1px solid ${C.line};
+          background:${zebra};">
+        <div style="font-size:12.5px;font-weight:700;color:${C.ink};">${esc(c.company)}</div>
+        <div style="font-size:9.5px;font-family:${MONO};color:${od ? C.crit : C.faint};
+             margin-top:2px;white-space:nowrap;">${
+          od ? (Math.floor(od / 30.44) >= 1 ? Math.floor(od / 30.44) + 'mo late' : od + 'd late')
+             : effMaturity(c) ? dmy(effMaturity(c)) : '—'}</div>
+      </td>
+      <td valign="top" bgcolor="${zebra}" style="padding:9px 10px;border-bottom:1px solid ${C.line};
+          background:${zebra};">
+        ${(actions || []).map(a =>
+          `<div style="font-size:12.5px;color:${C.ink};font-weight:600;line-height:1.45;
+                margin-bottom:3px;">${esc(a)}</div>`).join('')
+          || `<div style="font-size:12px;color:${C.faint};">—</div>`}
+        ${last ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;margin-top:3px;">${
+          esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 118)}</div>` : ''}
+      </td>
+      <td valign="top" align="right" bgcolor="${zebra}"
+          style="padding:9px 10px;border-bottom:1px solid ${C.line};background:${zebra};
+                 white-space:nowrap;">
+        ${pill(c.status || '—', fg, bg)}
+        <div style="font-size:9.5px;font-family:${MONO};margin-top:4px;
+             color:${hot ? C.crit : C.faint};font-weight:${hot ? '700' : '400'};">${
+          c.due ? esc(c.due) : 'no date'}</div>
+      </td>
+    </tr>`;
   }
+
+  const gridHead = `<tr>
+    <td style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
+        letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">COMPANY</td>
+    <td style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
+        letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">WHAT TO DO</td>
+    <td align="right" style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
+        letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">STATUS / DUE</td>
+  </tr>`;
 
   function deskBlock(desk) {
     const { mine, chasing } = deskRows(desk);
-    const rows = mine.map(m => m.c).concat(chasing);
-    const head = `
+    if (!mine.length && !chasing.length) return '';
+    const grid = rows => `<table width="100%" cellpadding="0" cellspacing="0"
+        style="margin-top:4px;">${gridHead}${rows}</table>`;
+    return `<tr><td style="padding:0 28px 18px;">
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td style="font-size:17px;font-weight:700;color:${C.ink};letter-spacing:-.01em;">
+        <td style="font-size:15px;font-weight:700;color:${C.ink};padding-bottom:2px;">
           ${esc(desk.who)}
-          <span style="font-weight:400;color:${C.faint};font-size:12.5px;">
+          <span style="font-weight:400;color:${C.faint};font-size:11.5px;">
             · ${esc(desk.role)}</span></td>
-        <td align="right">${(() => {
-          const act = mine.length;
-          return act ? pill(act + ' to act', C.crit, C.critBg)
-                     : pill(chasing.length ? 'chasing only' : 'clear', C.ok, C.okBg);
-        })()}</td>
+        <td align="right">${mine.length
+          ? pill(mine.length + ' to act', C.crit, C.critBg)
+          : pill(chasing.length ? 'chasing only' : 'clear', C.ok, C.okBg)}</td>
       </tr></table>
-      <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>`;
-
-
-    const subhead = (text, colour) =>
-      `<tr><td style="padding:13px 0 2px;">
-         <div style="font-size:9.5px;font-family:${MONO};font-weight:700;letter-spacing:.09em;
-                     color:${colour};">${esc(text)}</div></td></tr>`;
-
-    return `<tr><td style="padding:0 28px 16px;">
-      <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
-        <div style="background:${C.soft};padding:14px 18px;border-bottom:1px solid ${C.line};">
-          ${head}</div>
-        <table width="100%" cellpadding="0" cellspacing="0" style="padding:0 18px 6px;">
-          ${mine.length
-            ? subhead(`YOUR MOVE · ${mine.length}`, C.bright)
-              + mine.map(m => deskItem(m.c, m.acts)).join('')
-            : subhead('YOUR MOVE · NONE', C.faint)
-              + `<tr><td style="padding:8px 0 2px;font-size:12.5px;color:${C.faint};">
-                   Nothing is waiting on ${esc(desk.who)} right now.</td></tr>`}
-          ${chasing.length
-            ? subhead(`${desk.who === 'Mina' ? 'WITH COUNSEL' : 'WITH THE COMPANIES'}`
-                      + ` · ${chasing.length}`, C.faint)
-              + chasing.map(waitingRow).join('')
-            : ''}
-        </table>
-      </div></td></tr>`;
+      ${mine.length ? grid(mine.map((m, i) => gridRow(m.c, m.acts, i))) : ''}
+      ${chasing.length ? `
+        <div style="font-size:8.5px;font-family:${MONO};font-weight:700;letter-spacing:.08em;
+             color:${C.faint};margin-top:12px;">${
+          desk.who === 'Mina' ? 'WITH COUNSEL' : 'WITH THE COMPANIES'} · ${chasing.length}</div>
+        ${grid(chasing.map((c, i) => gridRow(c, [], i)))}` : ''}
+    </td></tr>`;
   }
 
   /* Nothing should fall off the brief because its owner is blank or is
@@ -500,14 +370,20 @@ export function buildBrief({ companies, history, today }) {
   }
 
   /* ---- what moved ---- */
-  const movedBlock = moved.map(h => `<tr><td style="padding:9px 0;border-top:1px solid ${C.line};">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="font-size:12.5px;font-weight:700;color:${C.ink};">${esc(h.company || 'General')}</td>
-          <td align="right" style="font-size:11px;color:${C.faint};font-family:${MONO};">
-            ${esc(dmy(h.entry_date))}${h.source ? ' · ' + esc(h.source) : ''}</td>
-        </tr></table>
-        <div style="font-size:12.5px;color:${C.mid};margin-top:3px;">${bullets(h.entry, C.faint)}</div>
-      </td></tr>`).join('');
+  const movedBlock = moved.map((h, i) => {
+    const zebra = i % 2 ? C.soft : 'transparent';
+    return `<tr>
+      <td valign="top" bgcolor="${zebra}" width="86" style="padding:6px 8px;background:${zebra};
+          border-bottom:1px solid ${C.line};font-size:9.5px;font-family:${MONO};
+          color:${C.faint};white-space:nowrap;">${esc(dmy(h.entry_date))}</td>
+      <td valign="top" bgcolor="${zebra}" width="96" style="padding:6px 8px;background:${zebra};
+          border-bottom:1px solid ${C.line};font-size:11.5px;font-weight:700;color:${C.ink};
+          white-space:nowrap;">${esc(h.company || 'General')}</td>
+      <td valign="top" bgcolor="${zebra}" style="padding:6px 8px;background:${zebra};
+          border-bottom:1px solid ${C.line};font-size:11.5px;color:${C.mid};line-height:1.45;">${
+        esc(String(h.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 150)}</td>
+    </tr>`;
+  }).join('');
 
   /* ---- clocks ---- */
   const dueSoon = byNum
@@ -584,20 +460,17 @@ export function buildBrief({ companies, history, today }) {
     </tr></table>
   </td></tr>
 
-  ${section(usingFallback ? 'Most recent activity' : 'Moved in the last three days',
-      usingFallback
-        ? 'Nothing logged in the last three days, so here are the latest entries on file'
-        : `${moved.length} entr${moved.length === 1 ? 'y' : 'ies'} logged`)}
-  <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table></td></tr>
-
-  ${section('Your morning', 'What each person is holding, where it stands, and what to do about it')}
+  ${section('Your morning', 'What each of us is holding, and what to do about it')}
   ${DESKS.map(deskBlock).join('')}${orphanBlock()}
 
   ${section('Clocks', 'Past maturity, and reviews due inside seven days')}
   <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${clocks}</table></td></tr>
 
-  ${section('Every company', 'What happened, what is due next, and what closing the position looks like')}
-  ${byNum.map(c => timeline(c, history, now)).join('')}
+  ${section(usingFallback ? 'Most recent activity' : 'Moved in the last three days',
+      usingFallback
+        ? 'Nothing logged in the last three days, so here are the latest entries on file'
+        : `${moved.length} entr${moved.length === 1 ? 'y' : 'ies'} logged`)}
+  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table></td></tr>
 
   <tr><td style="padding:18px 28px 24px;border-top:1px solid ${C.line};">
     <div style="font-size:11.5px;color:${C.faint};line-height:1.6;">
@@ -626,6 +499,12 @@ export function buildBrief({ companies, history, today }) {
       company: c.company, status: c.status,
       meta: `${effMaturity(c) ? 'matures ' + dmy(effMaturity(c)) : 'no maturity'}`
             + `${od ? '  -  ' + od : ''}`,
+      metaShort: (() => {
+        const days = overdueDays(now, c);
+        if (days === null) return effMaturity(c) ? dmy(effMaturity(c)) : '-';
+        const mo = Math.floor(days / 30.44);
+        return mo >= 1 ? mo + 'mo late' : days + 'd late';   /* 0mo late reads as nothing */
+      })(),
       overdue: !!od,
       stands: last ? String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '') : '',
       standsWhen: last ? dmy(last.entry_date) + (last.source ? '  -  ' + last.source : '') : '',
@@ -854,8 +733,11 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
   /* Every section opens the same way, on its own page: a rule, its name, and a
      line or two saying what it is for, so the document explains itself to
      someone reading it for the first time. */
+  /* Sections used to take a page each. Now that the desks are grids that is
+     mostly white space, so they flow, breaking only when a section would start
+     with too little room beneath it to be worth reading. */
   const section = (title, blurb, opts = {}) => {
-    if (started && opts.newPage !== false) d.newPage();
+    if (started) { d.y += 14; d.room(opts.needs || 150); }
     started = true;
     d.rect(d.margin, d.y, d.innerWidth, 2, P.maroon);
     d.y += 12;
@@ -906,54 +788,48 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
   });
 
   /* ----------------------------------------------------- the desks ---- */
-  const companyBlock = (c, compact) => {
-    const [fg, bg] = tone(c.status);
-    d.rule(P.line, { after: 9 });
-    d.chip(c.status || '-', d.y - 1, R, fg, bg);
-    d.textAt(c.company, d.margin, d.y, { size: compact ? 10.5 : 12, bold: true,
-                                         colour: compact ? P.mid : P.ink });
-    d.y += compact ? 15 : 17;
-    if (!compact) d.para(c.meta, { size: 7.5, colour: c.overdue ? P.crit : P.faint, after: 5 });
-    if (c.stands) {
-      if (!compact) {
-        d.textAt('WHERE IT STANDS', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
-        if (c.standsWhen) d.textRight(c.standsWhen, R, d.y, { size: 6.8, colour: P.faint });
-        d.y += 10;
-      }
-      d.para(c.stands, { size: compact ? 8.5 : 9.5, colour: compact ? P.faint : P.mid,
-                         after: compact ? 4 : 7 });
-    }
-    if (compact) return;
-    if (c.ask) {
-      d.textAt('THE ASK', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
-      d.y += 10;
-      d.para(c.ask, { size: 9, colour: P.mid, after: 7 });
-    }
-    d.textAt('WHAT TO DO', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
-    if (c.due) d.textRight(c.due, R, d.y, { size: 6.8, colour: c.dueHot ? P.crit : P.faint,
-                                            bold: c.dueHot });
-    d.y += 11;
-    if (c.actions.length) {
-      c.actions.forEach(a => {
-        d.textAt('>', d.margin, d.y, { size: 9.5, bold: true, colour: P.gold });
-        d.para(a, { size: 9.5, bold: true, colour: P.ink, indent: 12, after: 2 });
-      });
-      d.y += 4;
-    } else d.para('No next action recorded.', { size: 9.5, colour: P.faint, after: 6 });
-    if (c.done.length) {
-      c.done.forEach(t => {
-        d.textAt('+', d.margin, d.y, { size: 8.5, bold: true, colour: P.ok });
-        d.para(t, { size: 8.5, colour: P.faint, indent: 12, after: 1 });
-      });
-      d.y += 4;
-    }
-    if (c.closure) {
-      d.textAt('CLOSING THIS', d.margin, d.y, { size: 6.8, bold: true, colour: P.ok });
-      d.y += 10;
-      d.para(c.closure, { size: 8.5, colour: P.faint, after: 4 });
-    }
-    d.y += 4;
+  /* A grid, matching the email. Columns are fixed so the eye can run down
+     them; each row is measured and kept whole. */
+  const COL = { co: 0, act: 118, right: d.innerWidth };
+  const gridHeader = () => {
+    d.textAt('COMPANY', d.margin, d.y, { size: 6.5, bold: true, colour: P.faint });
+    d.textAt('WHAT TO DO', d.margin + COL.act, d.y, { size: 6.5, bold: true, colour: P.faint });
+    d.textRight('STATUS / DUE', R, d.y, { size: 6.5, bold: true, colour: P.faint });
+    d.y += 9;
+    d.rect(d.margin, d.y, d.innerWidth, 1, P.line);
+    d.y += 6;
   };
+
+  const gridRow = (c, i) => d.keepTogether(() => {
+    const [fg, bg] = tone(c.status);
+    const top = d.y;
+    const actW = COL.right - COL.act - 104;
+    /* measure the tallest column first so the zebra covers the whole row */
+    const bodyLines = (c.actions.length ? c.actions : ['-'])
+      .reduce((n, a) => n + wrapCount(a, actW, 9, true), 0);
+    const standsLines = c.stands ? wrapCount(c.stands, actW, 7.5, false) : 0;
+    const h = Math.max(26, bodyLines * 12.5 + standsLines * 10 + 12);
+    if (i % 2) d.rect(d.margin - 4, top - 4, d.innerWidth + 8, h + 6, P.card);
+
+    d.textAt(c.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
+    d.textAt(c.metaShort, d.margin, d.y + 12, { size: 6.5,
+             colour: c.overdue ? P.crit : P.faint });
+    d.chip(c.status || '-', top - 2, R, fg, bg, 6.5);
+    d.textRight(c.due || 'no date', R, top + 14,
+                { size: 6.5, colour: c.dueHot ? P.crit : P.faint, bold: c.dueHot });
+
+    const save = d.y;
+    d.y = top;
+    (c.actions.length ? c.actions : ['-']).forEach(a => {
+      d.para(a, { size: 9, bold: true, colour: P.ink, indent: COL.act,
+                  width: COL.act + actW, after: 1 });
+    });
+    if (c.stands) d.para(c.stands, { size: 7.5, colour: P.faint, indent: COL.act,
+                                     width: COL.act + actW, after: 0 });
+    d.y = Math.max(d.y, save) + 8;
+  });
+  /* How many lines will this wrap to? Cheap enough to ask twice. */
+  const wrapCount = (t, w, size, bold) => wrapLines(t, bold, size, w).length;
 
   desks.concat(orphans ? [orphans] : []).forEach(desk => {
     const act = desk.mine.length;
@@ -963,26 +839,20 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
              : `Nothing needs ${desk.who}'s action today.`)
       + (desk.waiting.length
         ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} with `
-          + `${desk.who === 'Mina' ? 'counsel' : 'the companies'}, listed after -- `
-          + 'nothing to do unless they go quiet.'
+          + `${desk.who === 'Mina' ? 'counsel' : 'the companies'}.`
         : ''));
 
-    d.textAt(act ? 'YOUR MOVE - ' + act : 'YOUR MOVE - NONE', d.margin, d.y,
-             { size: 7, bold: true, colour: act ? P.crit : P.faint });
-    d.y += 12;
-    if (act) desk.mine.forEach(c => d.keepTogether(() => companyBlock(c, false)));
+    if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
     else d.para('Nothing is waiting on ' + desk.who + ' right now.',
-                { size: 9, colour: P.faint, after: 4 });
+                { size: 9, colour: P.faint, after: 6 });
 
     if (desk.waiting.length) {
-      d.y += 8;
-      d.keepTogether(() => {
-        d.textAt((desk.chaseLabel || 'Waiting').toUpperCase() + ' - ' + desk.waiting.length,
-                 d.margin, d.y,
-                 { size: 7, bold: true, colour: P.faint });
-        d.y += 12;
-      });
-      desk.waiting.forEach(c => d.keepTogether(() => companyBlock(c, true)));
+      d.y += 10;
+      d.textAt((desk.chaseLabel || 'Waiting').toUpperCase() + ' - ' + desk.waiting.length,
+               d.margin, d.y, { size: 6.5, bold: true, colour: P.faint });
+      d.y += 11;
+      gridHeader();
+      desk.waiting.forEach((c, i) => gridRow(c, i));
     }
   });
 

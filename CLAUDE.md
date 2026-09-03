@@ -85,11 +85,14 @@ output can be rendered and checked without sending anything.
   out from `brief.pdfData` rather than converted from the HTML, so the two carry
   the same content without the PDF depending on the markup. If it throws, the
   email still goes and the response says `pdf: failed`.
-- The PDF gives **each section its own page** and opens each with a sentence or
-  two saying what the section is for, so it reads standalone. Page 1 is the
-  masthead and an executive summary computed from the same data (exposure in
-  principal, what falls due inside a week, and each desk's count). Company
-  blocks are placed with `keepTogether()` so none is split across a page.
+- Desks render as a **grid** — company, what to do, status and due in fixed
+  columns with zebra rows — not as prose blocks. The per-company timelines were
+  removed with it: between them they made the brief too long to read at 7am.
+- The PDF **flows its sections** rather than giving each its own page, breaking only when one would start with
+  too little room beneath it. Each opens with a sentence saying what it is for.
+  Page 1 carries the masthead, the executive summary (exposure in principal,
+  what falls due inside a week, each desk's count) and usually the first desk.
+  Grid rows are placed with `keepTogether()` so none is split across a page.
 - `lib/pdf.js` supplies what PDF itself lacks: Helvetica and Helvetica-Bold
   character widths, a greedy wrapper, a cursor that starts a new page when it
   runs out of room, and `measure()`/`keepTogether()`, which run a block with
