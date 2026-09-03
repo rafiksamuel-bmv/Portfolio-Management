@@ -49,10 +49,10 @@ installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
 - The brief is organised by **person**, not by company: one block each for Mina,
-  Rafik and Reem, derived from `status` (Pending legal / company / our action).
-  Each company under a desk carries where it stands (newest history entry,
-  dated), what to do (the `next_action` lines), and what closing it looks like
-  (`closure`) — so nobody has to read another section to know their morning.
+  Rafik and Reem. Each company under a desk carries where it stands (newest
+  history entry, dated), what to do (that person's action lines), and what
+  closing it looks like (`closure`) — so nobody has to read another section to
+  know their morning. How a company reaches a desk is set out below.
 - The header shows the newest `updated_at` across the tracker. There is no
   `asOf` setting any more: it was maintained by hand and went stale.
 - Each company gets a timeline: its last three history entries dated, then the
@@ -63,20 +63,17 @@ output can be rendered and checked without sending anything.
 - The activity window is **three days**, not one, and falls back to the five
   most recent entries when nothing is in the window. A 24-hour window went
   blank on a quiet day, which is when the reader most needs the context.
-- **Desks come from `owner`, not from `status`.** The two answer different
-  questions and are independent. `status` is who holds the ball — us, counsel,
-  or the company. `owner` is which of the three has to move it, and so whose
-  desk it lands on. "Pending legal" means it has actually gone to Shawarby;
-  something Reem has asked Mina to send is still **Pending our action, on
-  Mina's desk**, which a status-derived desk could not express. A company whose
-  owner is blank or not one of the three appears under **Unassigned** rather
-  than dropping off the brief.
-- Each desk is split in two: **Your move** is `status = 'Pending our action'`,
-  rendered in full; **Waiting on others** is everything else on that desk,
-  rendered compactly. A desk's pill counts only what the person has to act on,
-  so "3 to act" and "waiting" mean different things at a glance. Answering
-  counsel is our move, not counsel's — that is why Zammit is Pending our action
-  on Mina's desk while Connect Money, genuinely sent to Hajar, is Pending legal.
+- **A desk is built from two things.** *Your move* is the `next_action` lines
+  tagged to that person — a line may begin `Mina:`, `Rafik:`, `Reem:` or
+  `Reem, Rafik:`, parsed by `parseAction()`, and only a prefix made entirely of
+  known names counts so ordinary text like `Note:` survives. An untagged line
+  falls to the company's `owner`. *Chasing* is the channel each person runs:
+  **Pending company is Rafik's, Pending legal is Mina's**, shown as "with the
+  companies" / "with counsel" and only when that company has no line tagged to
+  them already. One company can therefore sit on several desks with different
+  work, which is the point — Mina approves Flend's extension notice while Reem
+  and Rafik decide the follow-on. Anything reaching no desk appears under
+  **Unassigned**.
 - The brief is **always dark**, not "dark if the reader is". Email cannot carry
   a media query reliably, so the palette is written as literals (the app's dark
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
@@ -88,9 +85,16 @@ output can be rendered and checked without sending anything.
   out from `brief.pdfData` rather than converted from the HTML, so the two carry
   the same content without the PDF depending on the markup. If it throws, the
   email still goes and the response says `pdf: failed`.
+- The PDF gives **each section its own page** and opens each with a sentence or
+  two saying what the section is for, so it reads standalone. Page 1 is the
+  masthead and an executive summary computed from the same data (exposure in
+  principal, what falls due inside a week, and each desk's count). Company
+  blocks are placed with `keepTogether()` so none is split across a page.
 - `lib/pdf.js` supplies what PDF itself lacks: Helvetica and Helvetica-Bold
-  character widths, a greedy wrapper, and a cursor that starts a new page when
-  it runs out of room. The document is ASCII only (`ascii()` transliterates), so
+  character widths, a greedy wrapper, a cursor that starts a new page when it
+  runs out of room, and `measure()`/`keepTogether()`, which run a block with
+  output and pagination suppressed to find its height before placing it — so a
+  block can be kept whole without duplicating its layout arithmetic. The document is ASCII only (`ascii()` transliterates), so
   nothing depends on the reader's encoding.
 - `?pdf=1` returns the PDF without sending.
 - It needs the **service role** key, not the anon key: RLS grants only

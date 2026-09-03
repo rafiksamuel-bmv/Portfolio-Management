@@ -26,12 +26,22 @@ const DEFAULT_TO = 'rafiksamuel@aucegypt.edu';
    is which of us has to move it. They are independent -- an item Reem has
    asked Mina to send to Shawarby is "Pending our action" sitting on Mina's
    desk, which a status-derived desk could not express. */
+/* A desk is built from two things.
+     Your move  -- the next-action lines tagged to that person, whatever the
+                   company's status. An untagged line falls to the company's
+                   owner, so nothing goes unassigned.
+     Chasing    -- the channel each person runs: anything Pending company is
+                   Rafik's to chase, anything Pending legal is Mina's. Listed
+                   only when that company has no action tagged to them already.
+   So one company can sit on two desks with different work, which is the whole
+   point: Mina approves Flend's extension notice while Reem and Rafik decide
+   the follow-on. */
 const DESKS = [
-  { who: 'Mina',  role: 'counsel liaison',
-    lead: 'Everything that goes to or comes back from El-Shawarby.' },
-  { who: 'Rafik', role: 'company outreach',
-    lead: 'Everything that goes to or comes back from the companies.' },
-  { who: 'Reem',  role: 'decisions & Mr. Mohamed',
+  { who: 'Mina',  role: 'counsel liaison', chases: 'Pending legal',
+    lead: 'Work tagged to Mina, and everything sitting with El-Shawarby.' },
+  { who: 'Rafik', role: 'company outreach', chases: 'Pending company',
+    lead: 'Work tagged to Rafik, and everything sitting with the companies.' },
+  { who: 'Reem',  role: 'decisions & Mr. Mohamed', chases: null,
     lead: 'Calls to make, and anything that needs Mr. Mohamed.' },
 ];
 
@@ -108,6 +118,29 @@ function doneRecent(history, c, n) {
 function toLines(text) {
   return String(text || '').split('\n')
     .map(l => l.replace(/^[•\-]\s*/, '').trim()).filter(Boolean);
+}
+
+const PEOPLE = ['Mina', 'Rafik', 'Reem'];
+/* An action line may name who owns it: "Mina: draft the notice", or
+   "Reem, Rafik: decide the follow-on". Only a prefix made entirely of known
+   names counts, so ordinary text like "Note: ..." or "Confirm dilution: ..."
+   is left alone rather than being eaten as an owner. */
+function parseAction(line) {
+  const m = /^([^:]{1,60}):\s*(.+)$/.exec(String(line).trim());
+  if (m) {
+    const raw = m[1].split(/,|&|\band\b/).map(x => x.trim()).filter(Boolean);
+    const named = raw.map(x => PEOPLE.find(p => p.toLowerCase() === x.toLowerCase()))
+                     .filter(Boolean);
+    if (named.length && named.length === raw.length) {
+      return { owners: named, text: m[2].trim() };
+    }
+  }
+  return { owners: [], text: String(line).trim() };
+}
+/* Who has to do this line: its own tag, else the company's owner. */
+function actionOwners(line, company) {
+  const a = parseAction(line);
+  return a.owners.length ? a.owners : [(company.owner || '').trim()].filter(Boolean);
 }
 
 function esc(s) {
@@ -297,12 +330,12 @@ export function buildBrief({ companies, history, today }) {
                   color:${C.faint};">${right}</td>` : ''}
      </tr></table>`;
 
-  function deskItem(c) {
+  function deskItem(c, onlyActions) {
     const od = overdueLabel(now, c);
     const due = daysFrom(now, c.due);
     const hot = due !== null && due <= 7;
     const last = latestEntry(history, c);
-    const actions = toLines(c.next_action);
+    const actions = onlyActions || toLines(c.next_action).map(l => parseAction(l).text);
     const closure = toLines(c.closure);
     const [fg, bg] = statusTone(c.status);
 
@@ -362,6 +395,23 @@ export function buildBrief({ companies, history, today }) {
     </td></tr>`;
   }
 
+  /* One place that decides what lands on a desk, so the email and the PDF
+     cannot drift apart. */
+  function deskRows(desk) {
+    const mine = [];
+    byNum.forEach(c => {
+      const acts = toLines(c.next_action)
+        .map(l => ({ text: parseAction(l).text, owners: actionOwners(l, c) }))
+        .filter(a => a.owners.indexOf(desk.who) > -1);
+      if (acts.length) mine.push({ c, acts: acts.map(a => a.text) });
+    });
+    const has = {}; mine.forEach(m => { has[m.c.company] = 1; });
+    const chasing = desk.chases
+      ? byNum.filter(c => c.status === desk.chases && !has[c.company])
+      : [];
+    return { mine, chasing };
+  }
+
   /* Parked with counsel or the company: on this person's desk, but not their
      move today. Kept short so it cannot be confused with work to do. */
   function waitingRow(c) {
@@ -379,7 +429,8 @@ export function buildBrief({ companies, history, today }) {
   }
 
   function deskBlock(desk) {
-    const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
+    const { mine, chasing } = deskRows(desk);
+    const rows = mine.map(m => m.c).concat(chasing);
     const head = `
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="font-size:17px;font-weight:700;color:${C.ink};letter-spacing:-.01em;">
@@ -387,16 +438,13 @@ export function buildBrief({ companies, history, today }) {
           <span style="font-weight:400;color:${C.faint};font-size:12.5px;">
             · ${esc(desk.role)}</span></td>
         <td align="right">${(() => {
-          const act = rows.filter(c => c.status === 'Pending our action').length;
+          const act = mine.length;
           return act ? pill(act + ' to act', C.crit, C.critBg)
-                     : pill(rows.length ? 'waiting' : 'clear', C.ok, C.okBg);
+                     : pill(chasing.length ? 'chasing only' : 'clear', C.ok, C.okBg);
         })()}</td>
       </tr></table>
       <div style="font-size:12px;color:${C.faint};margin-top:4px;">${esc(desk.lead)}</div>`;
 
-
-    const mine    = rows.filter(c => c.status === 'Pending our action');
-    const waiting = rows.filter(c => c.status !== 'Pending our action');
 
     const subhead = (text, colour) =>
       `<tr><td style="padding:13px 0 2px;">
@@ -409,13 +457,15 @@ export function buildBrief({ companies, history, today }) {
           ${head}</div>
         <table width="100%" cellpadding="0" cellspacing="0" style="padding:0 18px 6px;">
           ${mine.length
-            ? subhead(`YOUR MOVE · ${mine.length}`, C.bright) + mine.map(deskItem).join('')
+            ? subhead(`YOUR MOVE · ${mine.length}`, C.bright)
+              + mine.map(m => deskItem(m.c, m.acts)).join('')
             : subhead('YOUR MOVE · NONE', C.faint)
               + `<tr><td style="padding:8px 0 2px;font-size:12.5px;color:${C.faint};">
                    Nothing is waiting on ${esc(desk.who)} right now.</td></tr>`}
-          ${waiting.length
-            ? subhead(`WAITING ON OTHERS · ${waiting.length}`, C.faint)
-              + waiting.map(waitingRow).join('')
+          ${chasing.length
+            ? subhead(`${desk.who === 'Mina' ? 'WITH COUNSEL' : 'WITH THE COMPANIES'}`
+                      + ` · ${chasing.length}`, C.faint)
+              + chasing.map(waitingRow).join('')
             : ''}
         </table>
       </div></td></tr>`;
@@ -424,8 +474,13 @@ export function buildBrief({ companies, history, today }) {
   /* Nothing should fall off the brief because its owner is blank or is
      somebody other than the three desks. */
   function orphanBlock() {
-    const named = DESKS.map(d => d.who);
-    const rows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+    const seen = {};
+    DESKS.forEach(d => {
+      const r = deskRows(d);
+      r.mine.forEach(m => { seen[m.c.company] = 1; });
+      r.chasing.forEach(c => { seen[c.company] = 1; });
+    });
+    const rows = byNum.filter(c => !seen[c.company]);
     if (!rows.length) return '';
     return `<tr><td style="padding:0 28px 16px;">
       <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
@@ -436,7 +491,8 @@ export function buildBrief({ companies, history, today }) {
                                      C.warn, C.warnBg)}</td>
           </tr></table>
           <div style="font-size:12px;color:${C.faint};margin-top:4px;">
-            No owner set, so nobody is holding these. Set an owner in the tracker.</div>
+            These reached no desk: no action is tagged to anyone and the status
+            does not put them with counsel or a company.</div>
         </div>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
@@ -585,22 +641,60 @@ export function buildBrief({ companies, history, today }) {
     };
   };
   const pdfDesks = DESKS.map(desk => {
-    const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
+    const { mine, chasing } = deskRows(desk);
     return {
       who: desk.who, role: desk.role,
-      mine:    rows.filter(c => c.status === 'Pending our action').map(forCompany),
-      waiting: rows.filter(c => c.status !== 'Pending our action').map(forCompany),
+      chaseLabel: desk.who === 'Mina' ? 'With counsel'
+                : desk.who === 'Rafik' ? 'With the companies' : 'Waiting',
+      mine:    mine.map(m => ({ ...forCompany(m.c), actions: m.acts })),
+      waiting: chasing.map(forCompany),
     };
   });
-  const named = DESKS.map(d => d.who);
-  const orphanRows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+  /* Anything that reached no desk at all still has to be visible. */
+  const onADesk = {};
+  DESKS.forEach(d => {
+    const { mine, chasing } = deskRows(d);
+    mine.forEach(m => { onADesk[m.c.company] = 1; });
+    chasing.forEach(c => { onADesk[c.company] = 1; });
+  });
+  const orphanRows = byNum.filter(c => !onADesk[c.company]);
+  /* An executive summary earns its space only if it says what the reader would
+     otherwise have to assemble: the exposure, what is late, and who owes what.
+     All three fall out of data already gathered above. */
+  const noExt = overdue.filter(c => !c.extended_to);
+  const lateOrDue = byNum
+    .map(c => ({ c, d: daysFrom(now, c.due) }))
+    .filter(x => x.d !== null && x.d <= 7)
+    .sort((a, b) => a.d - b.d);
+  const exposure = ccy => byNum
+    .filter(c => c.ccy === ccy && overdueDays(now, c) !== null && !c.extended_to)
+    .reduce((n, c) => n + (Number(c.invested) || 0), 0);
+  const summary = [
+    ['Position', topline],
+    ['Past maturity', noExt.length
+      ? `${noExt.length} of ${byNum.length} notes sit past maturity with no signed extension`
+        + `${exposure('USD') ? `, USD ${money(exposure('USD'))} of principal` : ''}`
+        + `${exposure('EGP') ? ` and EGP ${money(exposure('EGP'))}` : ''}`
+        + `. ${noExt.slice(0, 5).map(c => c.company).join(', ')}`
+        + `${noExt.length > 5 ? ' and others' : ''}.`
+      : 'Every note is either within term or covered by a signed extension.'],
+    ['Due inside a week', lateOrDue.length
+      ? lateOrDue.slice(0, 5).map(x => `${x.c.company} (${x.d < 0 ? Math.abs(x.d) + 'd late'
+          : x.d === 0 ? 'today' : x.d + 'd'})`).join(', ') + '.'
+      : 'Nothing falls due in the next seven days.'],
+    ['Desks', DESKS.map(dk => {
+        const { mine, chasing } = deskRows(dk);
+        return `${dk.who} ${mine.length ? mine.length + ' to act'
+                : chasing.length ? 'chasing only' : 'clear'}`;
+      }).join(', ') + '.'],
+  ];
+
   const pdfData = {
-    now, lastEdited, topline, greeting: greeting(now), stats,
+    now, lastEdited, topline, greeting: greeting(now), stats, summary,
     desks: pdfDesks,
     orphans: orphanRows.length
-      ? { who: 'Unassigned', role: 'no owner set',
-          mine: orphanRows.filter(c => c.status === 'Pending our action').map(forCompany),
-          waiting: orphanRows.filter(c => c.status !== 'Pending our action').map(forCompany) }
+      ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
+          mine: [], waiting: orphanRows.map(forCompany) }
       : null,
     moved: moved.map(h => ({
       company: h.company || 'General',
@@ -689,10 +783,13 @@ export default async function handler(req, res) {
   let attachments;
   let pdfNote = 'attached';
   try {
+    const bytes = briefPdf(brief.pdfData);
     attachments = [{
       filename: `portfolio-brief-${ymd(new Date())}.pdf`,
-      content: briefPdf(brief.pdfData).toString('base64'),
+      content: bytes.toString('base64'),
+      content_type: 'application/pdf',
     }];
+    pdfNote = `attached (${bytes.length} bytes)`;
   } catch (err) {
     attachments = undefined;
     pdfNote = `failed: ${err.message}`;
@@ -736,7 +833,8 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, moved, orphans }) {
+export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
+                           desks, moved, orphans }) {
   const P = {
     page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
     ink: '#EDE5E6', mid: '#B0A2A4', faint: '#867779',
@@ -751,8 +849,22 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
 
   const d = new Doc({ margin: 44, background: P.page });
   const R = d.margin + d.innerWidth;
+  let started = false;
 
-  /* masthead */
+  /* Every section opens the same way, on its own page: a rule, its name, and a
+     line or two saying what it is for, so the document explains itself to
+     someone reading it for the first time. */
+  const section = (title, blurb, opts = {}) => {
+    if (started && opts.newPage !== false) d.newPage();
+    started = true;
+    d.rect(d.margin, d.y, d.innerWidth, 2, P.maroon);
+    d.y += 12;
+    d.textAt(title.toUpperCase(), d.margin, d.y, { size: 10, bold: true, colour: P.gold });
+    d.y += 15;
+    d.para(blurb, { size: 8.5, colour: P.faint, after: 12 });
+  };
+
+  /* --------------------------------------------------------- page 1 ---- */
   d.rect(0, 0, d.w, 116, P.deep);
   d.rect(0, 114, d.w, 2, P.maroon);
   d.y = 26;
@@ -765,48 +877,51 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
   d.textAt('Prepared by Rafik for internal review'
            + (lastEdited ? '  -  tracker last edited ' + lastEdited : ''),
            d.margin, d.y, { size: 8, colour: P.gold });
-  d.y = 140;
+  d.y = 142;
 
-  d.para(greeting, { size: 10, colour: P.mid, after: 8 });
-  d.para(topline, { size: 12.5, bold: true, colour: P.ink, after: 14 });
+  d.para(greeting, { size: 10, colour: P.mid, after: 16 });
 
-  /* counts, evenly across the width */
+  section('Executive summary',
+    'The position in one view: what the portfolio looks like this morning, what is '
+  + 'past its maturity date, what falls due inside the week, and who is holding '
+  + 'work. Everything after this section is the detail behind it.',
+    { newPage: false });
+
+  (summary || []).forEach(([label, text]) => d.keepTogether(() => {
+    d.textAt(label.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.faint });
+    d.y += 11;
+    d.para(text, { size: 10, colour: P.ink, after: 11 });
+  }));
+
+  d.y += 4;
   const colW = d.innerWidth / stats.length;
-  d.room(42);
-  stats.forEach(([label, value, colour], i) => {
-    const x = d.margin + colW * i;
-    d.rect(x, d.y, colW - 6, 40, P.card);
-    d.textAt(value, x + 10, d.y + 8,  { size: 15, bold: true, colour });
-    d.textAt(label.toUpperCase(), x + 10, d.y + 27, { size: 6.5, bold: true, colour: P.faint });
+  d.keepTogether(() => {
+    stats.forEach(([label, value, colour], i) => {
+      const x = d.margin + colW * i;
+      d.rect(x, d.y, colW - 6, 40, P.card);
+      d.textAt(value, x + 10, d.y + 8,  { size: 15, bold: true, colour });
+      d.textAt(label.toUpperCase(), x + 10, d.y + 27, { size: 6.5, bold: true, colour: P.faint });
+    });
+    d.y += 46;
   });
-  d.y += 52;
 
-  const heading = (text, sub) => {
-    d.room(40);
-    d.textAt(text.toUpperCase(), d.margin, d.y, { size: 9, bold: true, colour: P.crit });
-    d.y += 13;
-    if (sub) { d.para(sub, { size: 8.5, colour: P.faint }); }
-    d.y += 3;
-  };
-
+  /* ----------------------------------------------------- the desks ---- */
   const companyBlock = (c, compact) => {
     const [fg, bg] = tone(c.status);
-    d.room(compact ? 44 : 96);
     d.rule(P.line, { after: 9 });
     d.chip(c.status || '-', d.y - 1, R, fg, bg);
     d.textAt(c.company, d.margin, d.y, { size: compact ? 10.5 : 12, bold: true,
                                          colour: compact ? P.mid : P.ink });
     d.y += compact ? 15 : 17;
-    if (!compact) {
-      d.para(c.meta, { size: 7.5, colour: c.overdue ? P.crit : P.faint, after: 5 });
-    }
+    if (!compact) d.para(c.meta, { size: 7.5, colour: c.overdue ? P.crit : P.faint, after: 5 });
     if (c.stands) {
       if (!compact) {
         d.textAt('WHERE IT STANDS', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
         if (c.standsWhen) d.textRight(c.standsWhen, R, d.y, { size: 6.8, colour: P.faint });
         d.y += 10;
       }
-      d.para(c.stands, { size: compact ? 8.5 : 9.5, colour: compact ? P.faint : P.mid, after: compact ? 4 : 7 });
+      d.para(c.stands, { size: compact ? 8.5 : 9.5, colour: compact ? P.faint : P.mid,
+                         after: compact ? 4 : 7 });
     }
     if (compact) return;
     if (c.ask) {
@@ -815,21 +930,18 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
       d.para(c.ask, { size: 9, colour: P.mid, after: 7 });
     }
     d.textAt('WHAT TO DO', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
-    if (c.due) d.textRight(c.due, R, d.y, { size: 6.8, colour: c.dueHot ? P.crit : P.faint, bold: c.dueHot });
+    if (c.due) d.textRight(c.due, R, d.y, { size: 6.8, colour: c.dueHot ? P.crit : P.faint,
+                                            bold: c.dueHot });
     d.y += 11;
     if (c.actions.length) {
       c.actions.forEach(a => {
-        d.room(14);
         d.textAt('>', d.margin, d.y, { size: 9.5, bold: true, colour: P.gold });
         d.para(a, { size: 9.5, bold: true, colour: P.ink, indent: 12, after: 2 });
       });
       d.y += 4;
-    } else {
-      d.para('No next action recorded.', { size: 9.5, colour: P.faint, after: 6 });
-    }
+    } else d.para('No next action recorded.', { size: 9.5, colour: P.faint, after: 6 });
     if (c.done.length) {
       c.done.forEach(t => {
-        d.room(12);
         d.textAt('+', d.margin, d.y, { size: 8.5, bold: true, colour: P.ok });
         d.para(t, { size: 8.5, colour: P.faint, indent: 12, after: 1 });
       });
@@ -843,47 +955,50 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, mov
     d.y += 4;
   };
 
-  heading('Your morning', 'What each person is holding, where it stands, and what to do about it');
   desks.concat(orphans ? [orphans] : []).forEach(desk => {
-    d.room(70);
-    d.y += 6;
-    d.rect(d.margin, d.y, d.innerWidth, 30, P.card);
-    d.textAt(desk.who, d.margin + 11, d.y + 7, { size: 12.5, bold: true, colour: P.ink });
-    d.textAt(desk.role, d.margin + 11 + 8
-             + Math.max(38, desk.who.length * 7.2), d.y + 10, { size: 8, colour: P.faint });
     const act = desk.mine.length;
-    d.chip(act ? act + ' to act' : (desk.waiting.length ? 'waiting' : 'clear'),
-           d.y + 8, R - 11, act ? P.crit : P.ok, act ? P.critBg : P.okBg);
-    d.y += 38;
+    section(desk.who,
+      `${desk.role}. `
+      + (act ? `${act} ${act === 1 ? 'item needs' : 'items need'} ${desk.who}'s action today.`
+             : `Nothing needs ${desk.who}'s action today.`)
+      + (desk.waiting.length
+        ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} with `
+          + `${desk.who === 'Mina' ? 'counsel' : 'the companies'}, listed after -- `
+          + 'nothing to do unless they go quiet.'
+        : ''));
 
     d.textAt(act ? 'YOUR MOVE - ' + act : 'YOUR MOVE - NONE', d.margin, d.y,
              { size: 7, bold: true, colour: act ? P.crit : P.faint });
     d.y += 12;
-    if (act) desk.mine.forEach(c => companyBlock(c, false));
+    if (act) desk.mine.forEach(c => d.keepTogether(() => companyBlock(c, false)));
     else d.para('Nothing is waiting on ' + desk.who + ' right now.',
                 { size: 9, colour: P.faint, after: 4 });
 
     if (desk.waiting.length) {
-      d.y += 6;
-      d.textAt('WAITING ON OTHERS - ' + desk.waiting.length, d.margin, d.y,
-               { size: 7, bold: true, colour: P.faint });
-      d.y += 12;
-      desk.waiting.forEach(c => companyBlock(c, true));
+      d.y += 8;
+      d.keepTogether(() => {
+        d.textAt((desk.chaseLabel || 'Waiting').toUpperCase() + ' - ' + desk.waiting.length,
+                 d.margin, d.y,
+                 { size: 7, bold: true, colour: P.faint });
+        d.y += 12;
+      });
+      desk.waiting.forEach(c => d.keepTogether(() => companyBlock(c, true)));
     }
-    d.y += 10;
   });
 
+  /* -------------------------------------------------- what moved ---- */
   if (moved.length) {
-    d.room(80);
-    heading(moved.length + ' entries logged', 'Moved in the last three days');
-    moved.forEach(m => {
-      d.room(34);
+    section('Moved in the last three days',
+      'Every entry logged across the portfolio in the last three days, newest first, '
+      + `${moved.length} in all. This is the raw record; the desks above are what to `
+      + 'do about it.');
+    moved.forEach(m => d.keepTogether(() => {
       d.rule(P.line, { after: 8 });
       d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
       d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
       d.y += 13;
       d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
-    });
+    }));
   }
 
   return d.toBuffer((doc, page, total) => {
