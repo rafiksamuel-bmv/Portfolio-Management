@@ -1,3 +1,5 @@
+import { Doc } from '../lib/pdf.js';
+
 /* Daily portfolio brief.
  *
  * Runs on a Vercel cron (see vercel.json), reads the tracker straight from
@@ -5,6 +7,7 @@
  * Resend are both plain REST, so this needs nothing installed.
  *
  * GET /api/daily-brief?preview=1   renders the HTML without sending.
+ * GET /api/daily-brief?pdf=1       returns the PDF without sending.
  *
  * Environment (set in Vercel, never in the repo):
  *   SUPABASE_URL                the project URL
@@ -12,7 +15,6 @@
  *   RESEND_API_KEY              sending key
  *   BRIEF_TO                    recipient (defaults below)
  *   BRIEF_FROM                  verified sender
- *   PDFSHIFT_API_KEY            optional; attaches a PDF when set
  *   SUPABASE_ANON_KEY           optional; lets a signed-in person send from the app
  *   CRON_SECRET                 set by Vercel; also accepted as ?key= for previews
  */
@@ -558,7 +560,57 @@ export function buildBrief({ companies, history, today }) {
     + `${counts['Pending our action']} ours`
     + (overdue.length ? ` · ${overdue.length} past maturity` : '');
 
-  return { html, subject, topline, counts, overdue: overdue.length, moved: moved.length };
+  /* The same content the HTML shows, as plain data, so the PDF is laid out
+     from the brief rather than converted from its markup. */
+  const forCompany = c => {
+    const last = latestEntry(history, c);
+    const due = daysFrom(now, c.due);
+    const od = overdueLabel(now, c);
+    return {
+      company: c.company, status: c.status,
+      meta: `${effMaturity(c) ? 'matures ' + dmy(effMaturity(c)) : 'no maturity'}`
+            + `${od ? '  -  ' + od : ''}`,
+      overdue: !!od,
+      stands: last ? String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '') : '',
+      standsWhen: last ? dmy(last.entry_date) + (last.source ? '  -  ' + last.source : '') : '',
+      ask: (c.legal_req && c.status === 'Pending legal') ? c.legal_req : '',
+      due: c.due ? 'due ' + c.due + (due !== null && due <= 7
+            ? '  -  ' + (due < 0 ? Math.abs(due) + ' days late' : due === 0 ? 'today' : due + ' days')
+            : '') : 'no date set',
+      dueHot: due !== null && due <= 7,
+      actions: toLines(c.next_action),
+      done: doneRecent(history, c).map(h =>
+        String(h.entry).replace(/^Completed:\s*/, '') + '  (' + dmy(h.entry_date) + ')'),
+      closure: toLines(c.closure).join(' '),
+    };
+  };
+  const pdfDesks = DESKS.map(desk => {
+    const rows = byNum.filter(c => (c.owner || '').trim() === desk.who);
+    return {
+      who: desk.who, role: desk.role,
+      mine:    rows.filter(c => c.status === 'Pending our action').map(forCompany),
+      waiting: rows.filter(c => c.status !== 'Pending our action').map(forCompany),
+    };
+  });
+  const named = DESKS.map(d => d.who);
+  const orphanRows = byNum.filter(c => named.indexOf((c.owner || '').trim()) === -1);
+  const pdfData = {
+    now, lastEdited, topline, greeting: greeting(now), stats,
+    desks: pdfDesks,
+    orphans: orphanRows.length
+      ? { who: 'Unassigned', role: 'no owner set',
+          mine: orphanRows.filter(c => c.status === 'Pending our action').map(forCompany),
+          waiting: orphanRows.filter(c => c.status !== 'Pending our action').map(forCompany) }
+      : null,
+    moved: moved.map(h => ({
+      company: h.company || 'General',
+      when: dmy(h.entry_date) + (h.source ? '  -  ' + h.source : ''),
+      entry: String(h.entry).replace(/^[•\-]\s*/, ''),
+    })),
+  };
+
+  return { html, subject, topline, counts, pdfData,
+           overdue: overdue.length, moved: moved.length };
 }
 
 /* ---------- data ---------- */
@@ -609,14 +661,22 @@ export default async function handler(req, res) {
     return res.status(500).send('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set.');
   }
 
+  const now0 = new Date();
   let brief;
   try {
     const data = await loadTracker(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    brief = buildBrief({ ...data, today: new Date() });
+    brief = buildBrief({ ...data, today: now0 });
   } catch (err) {
     return res.status(502).send(`Could not build the brief: ${err.message}`);
   }
 
+  if (url.searchParams.get('pdf') === '1') {
+    const buf = briefPdf(brief.pdfData);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition',
+      `inline; filename="portfolio-brief-${ymd(now0)}.pdf"`);
+    return res.status(200).send(buf);
+  }
   if (preview) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.status(200).send(brief.html);
@@ -624,21 +684,18 @@ export default async function handler(req, res) {
 
   if (!RESEND_API_KEY) return res.status(500).send('RESEND_API_KEY is not set.');
 
-  /* PDF is optional. Without a key the email still goes as HTML, which is
-     what most clients render best anyway. */
+  /* The PDF is built here, so it needs no key and cannot fail because an
+     external service is down. If it throws anyway, the email still goes. */
   let attachments;
-  let pdfNote = 'not configured';
-  if (process.env.PDFSHIFT_API_KEY) {
-    try {
-      const pdf = await toPdf(brief.html, process.env.PDFSHIFT_API_KEY);
-      attachments = [{
-        filename: `portfolio-brief-${ymd(new Date())}.pdf`,
-        content: Buffer.from(pdf).toString('base64'),
-      }];
-      pdfNote = 'attached';
-    } catch (err) {
-      pdfNote = `failed: ${err.message}`;   // never block the email on the PDF
-    }
+  let pdfNote = 'attached';
+  try {
+    attachments = [{
+      filename: `portfolio-brief-${ymd(new Date())}.pdf`,
+      content: briefPdf(brief.pdfData).toString('base64'),
+    }];
+  } catch (err) {
+    attachments = undefined;
+    pdfNote = `failed: ${err.message}`;
   }
 
   const send = await fetch('https://api.resend.com/emails', {
@@ -674,17 +731,165 @@ async function isSignedIn(token, supabaseUrl, apikey) {
   } catch { return false; }
 }
 
-/* HTML to PDF via PDFShift. Swapping providers means changing this one
-   function: everything else deals in HTML. */
-async function toPdf(html, key) {
-  const res = await fetch('https://api.pdfshift.io/v3/convert/pdf', {
-    method: 'POST',
-    headers: {
-      Authorization: 'Basic ' + Buffer.from(`api:${key}`).toString('base64'),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ source: html, landscape: false, format: 'A4', margin: '12mm' }),
+/* The brief as a PDF, laid out rather than converted.
+   Written here for the same reason the Excel export is: it needs no service,
+   no key and no dependency, and the daily job cannot fail because somebody
+   else's API is down. It carries the same content in the same order as the
+   email, in the same dark identity. */
+export function briefPdf({ now, lastEdited, topline, greeting, stats, desks, moved, orphans }) {
+  const P = {
+    page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
+    ink: '#EDE5E6', mid: '#B0A2A4', faint: '#867779',
+    maroon: '#8E2B39', deep: '#5E1621', gold: '#D9B441',
+    crit: '#E88C92', critBg: '#3A1D20', warn: '#D9AE55', warnBg: '#382D14',
+    calm: '#93A6C8', calmBg: '#1F2739', ok: '#5FBE92', okBg: '#14301F',
+  };
+  const tone = st => st === 'Pending our action' ? [P.warn, P.warnBg]
+                  : st === 'Pending legal'      ? [P.calm, P.calmBg]
+                  : st === 'On track'           ? [P.ok,   P.okBg]
+                  : [P.mid, P.soft];
+
+  const d = new Doc({ margin: 44, background: P.page });
+  const R = d.margin + d.innerWidth;
+
+  /* masthead */
+  d.rect(0, 0, d.w, 116, P.deep);
+  d.rect(0, 114, d.w, 2, P.maroon);
+  d.y = 26;
+  d.textAt('BM VENTURES - STRATEGIC VENTURES', d.margin, d.y, { size: 8, bold: true, colour: P.gold });
+  d.y += 15;
+  d.textAt('Portfolio Brief', d.margin, d.y, { size: 22, bold: true, colour: '#FFFFFF' });
+  d.y += 29;
+  d.textAt(longDate(now), d.margin, d.y, { size: 11, bold: true, colour: '#FFFFFF' });
+  d.y += 15;
+  d.textAt('Prepared by Rafik for internal review'
+           + (lastEdited ? '  -  tracker last edited ' + lastEdited : ''),
+           d.margin, d.y, { size: 8, colour: P.gold });
+  d.y = 140;
+
+  d.para(greeting, { size: 10, colour: P.mid, after: 8 });
+  d.para(topline, { size: 12.5, bold: true, colour: P.ink, after: 14 });
+
+  /* counts, evenly across the width */
+  const colW = d.innerWidth / stats.length;
+  d.room(42);
+  stats.forEach(([label, value, colour], i) => {
+    const x = d.margin + colW * i;
+    d.rect(x, d.y, colW - 6, 40, P.card);
+    d.textAt(value, x + 10, d.y + 8,  { size: 15, bold: true, colour });
+    d.textAt(label.toUpperCase(), x + 10, d.y + 27, { size: 6.5, bold: true, colour: P.faint });
   });
-  if (!res.ok) throw new Error(`PDFShift ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return res.arrayBuffer();
+  d.y += 52;
+
+  const heading = (text, sub) => {
+    d.room(40);
+    d.textAt(text.toUpperCase(), d.margin, d.y, { size: 9, bold: true, colour: P.crit });
+    d.y += 13;
+    if (sub) { d.para(sub, { size: 8.5, colour: P.faint }); }
+    d.y += 3;
+  };
+
+  const companyBlock = (c, compact) => {
+    const [fg, bg] = tone(c.status);
+    d.room(compact ? 44 : 96);
+    d.rule(P.line, { after: 9 });
+    d.chip(c.status || '-', d.y - 1, R, fg, bg);
+    d.textAt(c.company, d.margin, d.y, { size: compact ? 10.5 : 12, bold: true,
+                                         colour: compact ? P.mid : P.ink });
+    d.y += compact ? 15 : 17;
+    if (!compact) {
+      d.para(c.meta, { size: 7.5, colour: c.overdue ? P.crit : P.faint, after: 5 });
+    }
+    if (c.stands) {
+      if (!compact) {
+        d.textAt('WHERE IT STANDS', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
+        if (c.standsWhen) d.textRight(c.standsWhen, R, d.y, { size: 6.8, colour: P.faint });
+        d.y += 10;
+      }
+      d.para(c.stands, { size: compact ? 8.5 : 9.5, colour: compact ? P.faint : P.mid, after: compact ? 4 : 7 });
+    }
+    if (compact) return;
+    if (c.ask) {
+      d.textAt('THE ASK', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
+      d.y += 10;
+      d.para(c.ask, { size: 9, colour: P.mid, after: 7 });
+    }
+    d.textAt('WHAT TO DO', d.margin, d.y, { size: 6.8, bold: true, colour: P.faint });
+    if (c.due) d.textRight(c.due, R, d.y, { size: 6.8, colour: c.dueHot ? P.crit : P.faint, bold: c.dueHot });
+    d.y += 11;
+    if (c.actions.length) {
+      c.actions.forEach(a => {
+        d.room(14);
+        d.textAt('>', d.margin, d.y, { size: 9.5, bold: true, colour: P.gold });
+        d.para(a, { size: 9.5, bold: true, colour: P.ink, indent: 12, after: 2 });
+      });
+      d.y += 4;
+    } else {
+      d.para('No next action recorded.', { size: 9.5, colour: P.faint, after: 6 });
+    }
+    if (c.done.length) {
+      c.done.forEach(t => {
+        d.room(12);
+        d.textAt('+', d.margin, d.y, { size: 8.5, bold: true, colour: P.ok });
+        d.para(t, { size: 8.5, colour: P.faint, indent: 12, after: 1 });
+      });
+      d.y += 4;
+    }
+    if (c.closure) {
+      d.textAt('CLOSING THIS', d.margin, d.y, { size: 6.8, bold: true, colour: P.ok });
+      d.y += 10;
+      d.para(c.closure, { size: 8.5, colour: P.faint, after: 4 });
+    }
+    d.y += 4;
+  };
+
+  heading('Your morning', 'What each person is holding, where it stands, and what to do about it');
+  desks.concat(orphans ? [orphans] : []).forEach(desk => {
+    d.room(70);
+    d.y += 6;
+    d.rect(d.margin, d.y, d.innerWidth, 30, P.card);
+    d.textAt(desk.who, d.margin + 11, d.y + 7, { size: 12.5, bold: true, colour: P.ink });
+    d.textAt(desk.role, d.margin + 11 + 8
+             + Math.max(38, desk.who.length * 7.2), d.y + 10, { size: 8, colour: P.faint });
+    const act = desk.mine.length;
+    d.chip(act ? act + ' to act' : (desk.waiting.length ? 'waiting' : 'clear'),
+           d.y + 8, R - 11, act ? P.crit : P.ok, act ? P.critBg : P.okBg);
+    d.y += 38;
+
+    d.textAt(act ? 'YOUR MOVE - ' + act : 'YOUR MOVE - NONE', d.margin, d.y,
+             { size: 7, bold: true, colour: act ? P.crit : P.faint });
+    d.y += 12;
+    if (act) desk.mine.forEach(c => companyBlock(c, false));
+    else d.para('Nothing is waiting on ' + desk.who + ' right now.',
+                { size: 9, colour: P.faint, after: 4 });
+
+    if (desk.waiting.length) {
+      d.y += 6;
+      d.textAt('WAITING ON OTHERS - ' + desk.waiting.length, d.margin, d.y,
+               { size: 7, bold: true, colour: P.faint });
+      d.y += 12;
+      desk.waiting.forEach(c => companyBlock(c, true));
+    }
+    d.y += 10;
+  });
+
+  if (moved.length) {
+    d.room(80);
+    heading(moved.length + ' entries logged', 'Moved in the last three days');
+    moved.forEach(m => {
+      d.room(34);
+      d.rule(P.line, { after: 8 });
+      d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
+      d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
+      d.y += 13;
+      d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
+    });
+  }
+
+  return d.toBuffer((doc, page, total) => {
+    doc.textAt('BM Ventures  -  Portfolio Brief  -  ' + longDate(now),
+               doc.margin, doc.h - 30, { size: 7, colour: P.faint });
+    doc.textRight(page + ' / ' + total, doc.w - doc.margin, doc.h - 30,
+                  { size: 7, colour: P.faint });
+  });
 }
