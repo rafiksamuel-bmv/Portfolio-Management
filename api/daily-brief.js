@@ -689,10 +689,13 @@ export default async function handler(req, res) {
   let attachments;
   let pdfNote = 'attached';
   try {
+    const bytes = briefPdf(brief.pdfData);
     attachments = [{
       filename: `portfolio-brief-${ymd(new Date())}.pdf`,
-      content: briefPdf(brief.pdfData).toString('base64'),
+      content: bytes.toString('base64'),
+      content_type: 'application/pdf',
     }];
+    pdfNote = `attached (${bytes.length} bytes)`;
   } catch (err) {
     attachments = undefined;
     pdfNote = `failed: ${err.message}`;
