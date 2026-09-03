@@ -774,7 +774,8 @@
   /* ---------- toast / save ---------- */
   var cfCb=null;
   function askConfirm(title, body, yesLabel, cb){
-    $("cfTitle").textContent=title; $("cfBody").textContent=body||"";
+    $("cfTitle").textContent=title;
+    $("cfBody").textContent=body||""; $("cfBody").style.whiteSpace="pre-wrap";
     $("cfYes").textContent=yesLabel||"Confirm"; cfCb=cb; $("confirmModal").hidden=false;
   }
   /* Ticking an action writes history and edits the company, so it needs a way
@@ -975,8 +976,39 @@
       }
     });
   }
-  function addHistory(row){
+  /* Word-overlap similarity. Correcting the wording of an entry through the
+     situation box posts a second, nearly identical one -- which is how Flend
+     ended up logged three times -- so warn before adding a near copy. Softly:
+     the hard unique index that used to sit here blocked legitimate edits. */
+  function normWords(t){
+    return String(t||"").toLowerCase().replace(/[^a-z0-9\s]/g," ")
+      .split(/\s+/).filter(Boolean);
+  }
+  function similarity(a,b){
+    var A=normWords(a), B=normWords(b);
+    if(!A.length || !B.length) return 0;
+    var inB={}; B.forEach(function(w){ inB[w]=1; });
+    var uniqA={}; A.forEach(function(w){ uniqA[w]=1; });
+    var hit=0; Object.keys(uniqA).forEach(function(w){ if(inB[w]) hit++; });
+    return hit / Math.max(Object.keys(uniqA).length, Object.keys(inB).length);
+  }
+  function nearDuplicate(company, date, text){
+    return state.history.filter(function(h){
+      return h.company===company && h.date===date && similarity(h.entry, text)>=0.8;
+    })[0];
+  }
+  function addHistory(row, opts){
     if(!sb) return;
+    if(!(opts&&opts.force)){
+      var dup=nearDuplicate(row.company, row.date, row.entry);
+      if(dup){
+        askConfirm("Already logged something very like this",
+          "\u201c"+(dup.entry.length>120?dup.entry.slice(0,120)+"\u2026":dup.entry)+"\u201d\n\n"+
+          "To reword that entry, cancel and edit it in the History Log instead of adding a second one.",
+          "Add anyway", function(){ addHistory(row, {force:true}); });
+        return;
+      }
+    }
     var id=uid();
     busy(true);
     sb.from("history").insert({ id:id, entry_date:row.date, company:row.company, entry:row.entry,
@@ -1534,7 +1566,8 @@
     var text=line.replace(/^[\u2022\-]\s*/,"");
     var rest=lines.filter(function(_,i){ return i!==idx; }).join("\n");
     var was=c.nextAction, stamp=today();
-    addHistory({date:stamp, company:c.company, entry:"Completed: "+text, source:DONE_SRC});
+    addHistory({date:stamp, company:c.company, entry:"Completed: "+text, source:DONE_SRC},
+               {force:true});
     var patch={nextAction:rest, lastUpdated:stamp};
     saveCompany(c.id, patch, function(s){
       var t=s.companies.filter(function(x){ return x.id===c.id; })[0];

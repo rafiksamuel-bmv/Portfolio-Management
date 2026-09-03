@@ -180,6 +180,12 @@ colour only inside a media query. The two logos are base64 data URIs.
   blocked editing an entry into wording another already had. The seed now
   guards itself with `where not exists (select 1 from public.history)`, and
   **Undo** is the safeguard against accidental duplicates. Do not reintroduce it.
+- In its place `addHistory()` warns before adding a **near** duplicate: word
+  overlap of 0.8 or more against an entry with the same company and date
+  (`similarity()`). It is a confirm, not a block — the situation box adds rather
+  than edits, so rewording an entry through it posts a second nearly identical
+  one, which is how Flend came to be logged three times. Pass `{force:true}` to
+  skip the check, as ticking an action does.
 - **Every write records its inverse** on a 20-deep undo stack (`pushUndo`).
   Inserts carry a client-generated `uid()` rather than a Postgres default, so
   undoing an insert can address the row and undoing a delete restores the same
