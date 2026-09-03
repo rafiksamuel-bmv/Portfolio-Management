@@ -211,14 +211,27 @@ colour only inside a media query. The two logos are base64 data URIs.
   appear in schema order (`sheetViews`, `sheetFormatPr`, `cols`, `sheetData`,
   `autoFilter`, `mergeCells`, `pageSetup`), and a single control character in
   any cell makes Excel reject the whole workbook — `xesc()` strips them.
-- The export's columns, widths and group bands deliberately mirror
-  `Portfolio_Dashboard_v4.xlsx` — verified by diffing a generated file against it.
-  Two deliberate departures: bands use the app's maroon identity rather than the
-  workbook's navy (with LEGAL a bright red, `#C00000`, so it stands out), and the
-  subtitle omits the workbook's "Confidential — Internal", per the domain rule
-  above.
-- Dates are written as Excel serials (`xlDate`, days since 1899-12-30). Invested
-  and Cap use `#,##0` and **not** the workbook's `$#,##0`, because the tracker
-  holds EGP positions too and the currency lives in its own `Ccy` column.
+- The export is a boardroom-readable snapshot, not a mirror of the operational
+  tracker: `XL_TRACKER_COLS` drops the contract-detail columns (instrument,
+  bucket, ccy, invested, cap, discount, the trigger/maturity dates) — those
+  live in the app, not the sheet a reviewer forwards. It leads with Priority
+  (`exportXlsx` sorts rows by `PRI_ORDER` before building), then Company, then
+  `issue_title`, a genuine stored one-liner ("Title of Ongoing Issue") edited
+  from "Edit status & action" alongside Strategic Closure — not derived from
+  the situation text, since there is no reliable way to summarise arbitrary
+  free text into a one-liner without an LLM in the loop, and this app has none
+  client-side. The subtitle omits "Confidential — Internal", per the domain
+  rule above.
+- **The `closure` column is labelled "Strategic Target"**, in the app and in
+  the export header. The column, the `CO_COLS` key and the seed all still say
+  `closure`; only the words the team reads changed. Do not rename the column
+  to match — it buys nothing and touches every read site.
+- Each entry in `XL_TRACKER_BANDS` carries **`p:`, an explicit index into
+  `XL_BANDS`**, rather than taking its colour from its position. Positional
+  colours broke the moment the band list got shorter: LEGAL is meant to be a
+  bright red `#C00000` so it stands out, and as the fifth of seven bands it
+  got that for free — as the third of five it silently became maroon. `at:`
+  indexes into `XL_TRACKER_COLS`, where index 0 is `#`, which stays unbanded.
+- Dates are written as Excel serials (`xlDate`, days since 1899-12-30).
 - The row detail panel gets its width set in JavaScript (`fitDetail`) because the
   table is wider than the viewport and the panel lives in a sticky cell.
