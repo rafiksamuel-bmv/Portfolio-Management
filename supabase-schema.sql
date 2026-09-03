@@ -31,6 +31,7 @@ create table if not exists public.companies (
   priority        text,
   next_action     text,
   closure         text,
+  issue_title     text,
   owner           text,
   due             text,
   legal_next      text,
