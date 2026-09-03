@@ -36,6 +36,7 @@ Production: https://portfolio-management-five-cyan.vercel.app
 | `launch.sh` | Clears git locks and pushes |
 | `middleware.ts` | Soft link-share gate (see Architecture) |
 | `api/daily-brief.js` | Daily portfolio brief: reads Supabase, emails it. Cron'd by `vercel.json` |
+| `lib/pdf.js` | Minimal PDF writer for the brief's attachment. Outside `api/` on purpose: anything in `api/` becomes an endpoint |
 | `vercel.json` | Cron schedule for the brief (04:00 UTC = 7am Cairo in summer) |
 | `404.html` | Shown to anyone the middleware gate blocks |
 | `package.json`, `package-lock.json` | Only exist for `middleware.ts`'s `@vercel/functions` dependency |
@@ -81,6 +82,17 @@ output can be rendered and checked without sending anything.
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
   overrides to stop Outlook and Gmail inverting the ground back to white under
   light text. Do not reintroduce light values here.
+- **Every send carries a PDF**, built by `briefPdf()` on top of `lib/pdf.js`.
+  Written by hand for the same reason as the Excel export: no service, no key,
+  and the morning job cannot fail because someone else's API is down. It is laid
+  out from `brief.pdfData` rather than converted from the HTML, so the two carry
+  the same content without the PDF depending on the markup. If it throws, the
+  email still goes and the response says `pdf: failed`.
+- `lib/pdf.js` supplies what PDF itself lacks: Helvetica and Helvetica-Bold
+  character widths, a greedy wrapper, and a cursor that starts a new page when
+  it runs out of room. The document is ASCII only (`ascii()` transliterates), so
+  nothing depends on the reader's encoding.
+- `?pdf=1` returns the PDF without sending.
 - It needs the **service role** key, not the anon key: RLS grants only
   `authenticated`, and a cron has no session.
 - `?preview=1` returns the HTML without sending.
@@ -96,7 +108,7 @@ output can be rendered and checked without sending anything.
 
 Environment, all set in Vercel and never in the repo: `SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `BRIEF_TO`, `BRIEF_FROM`,
-`CRON_SECRET`, and optionally `SUPABASE_ANON_KEY` and `PDFSHIFT_API_KEY`.
+`CRON_SECRET`, and optionally `SUPABASE_ANON_KEY`.
 
 ## Data model
 
