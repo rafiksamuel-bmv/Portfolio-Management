@@ -49,10 +49,10 @@ installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
 - The brief is organised by **person**, not by company: one block each for Mina,
-  Rafik and Reem, derived from `status` (Pending legal / company / our action).
-  Each company under a desk carries where it stands (newest history entry,
-  dated), what to do (the `next_action` lines), and what closing it looks like
-  (`closure`) — so nobody has to read another section to know their morning.
+  Rafik and Reem. Each company under a desk carries where it stands (newest
+  history entry, dated), what to do (that person's action lines), and what
+  closing it looks like (`closure`) — so nobody has to read another section to
+  know their morning. How a company reaches a desk is set out below.
 - The header shows the newest `updated_at` across the tracker. There is no
   `asOf` setting any more: it was maintained by hand and went stale.
 - Each company gets a timeline: its last three history entries dated, then the
@@ -74,20 +74,6 @@ output can be rendered and checked without sending anything.
   work, which is the point — Mina approves Flend's extension notice while Reem
   and Rafik decide the follow-on. Anything reaching no desk appears under
   **Unassigned**.
-- Older note, superseded above: **desks came from `owner`, not `status`.** The two answer different
-  questions and are independent. `status` is who holds the ball — us, counsel,
-  or the company. `owner` is which of the three has to move it, and so whose
-  desk it lands on. "Pending legal" means it has actually gone to Shawarby;
-  something Reem has asked Mina to send is still **Pending our action, on
-  Mina's desk**, which a status-derived desk could not express. A company whose
-  owner is blank or not one of the three appears under **Unassigned** rather
-  than dropping off the brief.
-- Each desk is split in two: **Your move** is `status = 'Pending our action'`,
-  rendered in full; **Waiting on others** is everything else on that desk,
-  rendered compactly. A desk's pill counts only what the person has to act on,
-  so "3 to act" and "waiting" mean different things at a glance. Answering
-  counsel is our move, not counsel's — that is why Zammit is Pending our action
-  on Mina's desk while Connect Money, genuinely sent to Hajar, is Pending legal.
 - The brief is **always dark**, not "dark if the reader is". Email cannot carry
   a media query reliably, so the palette is written as literals (the app's dark
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
