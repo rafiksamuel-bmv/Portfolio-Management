@@ -50,8 +50,12 @@ output can be rendered and checked without sending anything.
 
 - The brief is organised by **person**, not by company: one block each for Mina,
   Rafik and Reem. Each row carries the company, how late it is, that person's
-  action lines, and the status with its due date. How a company reaches a desk
-  is set out below.
+  action lines, and the status with its due date. Under the actions sits one
+  line of context: `issue_title` when the company has one, falling back to the
+  first line of the newest history entry (`issueLine()`). The fallback is the
+  guess `issue_title` was created to replace, so a company without a title
+  reads noticeably worse — that is the prompt to give it one. How a company
+  reaches a desk is set out below.
 - The header shows the newest `updated_at` across the tracker. There is no
   `asOf` setting any more: it was maintained by hand and went stale.
 - The activity window is **three days**, not one, and falls back to the five
@@ -214,14 +218,16 @@ colour only inside a media query. The two logos are base64 data URIs.
 - The export is a boardroom-readable snapshot, not a mirror of the operational
   tracker: `XL_TRACKER_COLS` drops the contract-detail columns (instrument,
   bucket, ccy, invested, cap, discount, the trigger/maturity dates) — those
-  live in the app, not the sheet a reviewer forwards. It leads with Priority
-  (`exportXlsx` sorts rows by `PRI_ORDER` before building), then Company, then
-  `issue_title`, a genuine stored one-liner ("Title of Ongoing Issue") edited
-  from "Edit status & action" alongside Strategic Closure — not derived from
-  the situation text, since there is no reliable way to summarise arbitrary
-  free text into a one-liner without an LLM in the loop, and this app has none
-  client-side. The subtitle omits "Confidential — Internal", per the domain
-  rule above.
+  live in the app, not the sheet a reviewer forwards. It also drops `#`: the
+  sheet is sorted by priority (`exportXlsx` sorts rows by `PRI_ORDER` before
+  building), so a row number that no longer counts up just reads as noise.
+  Company leads, then Priority, then `issue_title`, a genuine stored one-liner
+  ("Title of Ongoing Issue") edited from "Edit status & action" alongside
+  Strategic Target — not derived from the situation text, since there is no
+  reliable way to summarise arbitrary free text into a one-liner without an
+  LLM in the loop, and this app has none client-side. Last Updated is left
+  unbanded. The subtitle omits "Confidential — Internal", per the domain rule
+  above.
 - **The `closure` column is labelled "Strategic Target"**, in the app and in
   the export header. The column, the `CO_COLS` key and the seed all still say
   `closure`; only the words the team reads changed. Do not rename the column
