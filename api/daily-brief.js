@@ -111,7 +111,16 @@ function doneRecent(history, c, n) {
     ).slice(0, n || 3);
 }
 
-/* next_action and closure are written as "• " bullet lines. */
+/* The one line of context under a desk row. issue_title is the curated version
+   of what the newest entry's first line was only ever approximating, so prefer
+   it and fall back for any company that has not been given one yet. */
+function issueLine(c, last) {
+  const t = String(c.issue_title || '').trim();
+  if (t) return t;
+  return last ? String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '') : '';
+}
+
+/* next_action is written as "• " bullet lines. */
 function toLines(text) {
   return String(text || '').split('\n')
     .map(l => l.replace(/^[•\-]\s*/, '').trim()).filter(Boolean);
@@ -294,8 +303,8 @@ export function buildBrief({ companies, history, today }) {
           `<div style="font-size:12.5px;color:${C.ink};font-weight:600;line-height:1.45;
                 margin-bottom:3px;">${esc(a)}</div>`).join('')
           || `<div style="font-size:12px;color:${C.faint};">—</div>`}
-        ${last ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;margin-top:3px;">${
-          esc(String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 118)}</div>` : ''}
+        ${issueLine(c, last) ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;
+          margin-top:3px;">${esc(issueLine(c, last).slice(0, 118))}</div>` : ''}
       </td>
       <td valign="top" align="right" bgcolor="${zebra}"
           style="padding:9px 10px;border-bottom:1px solid ${C.line};background:${zebra};
@@ -506,7 +515,7 @@ export function buildBrief({ companies, history, today }) {
         return mo >= 1 ? mo + 'mo late' : days + 'd late';   /* 0mo late reads as nothing */
       })(),
       overdue: !!od,
-      stands: last ? String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '') : '',
+      stands: issueLine(c, last),
       standsWhen: last ? dmy(last.entry_date) + (last.source ? '  -  ' + last.source : '') : '',
       ask: (c.legal_req && c.status === 'Pending legal') ? c.legal_req : '',
       due: c.due ? 'due ' + c.due + (due !== null && due <= 7
@@ -516,7 +525,6 @@ export function buildBrief({ companies, history, today }) {
       actions: toLines(c.next_action),
       done: doneRecent(history, c).map(h =>
         String(h.entry).replace(/^Completed:\s*/, '') + '  (' + dmy(h.entry_date) + ')'),
-      closure: toLines(c.closure).join(' '),
     };
   };
   const pdfDesks = DESKS.map(desk => {

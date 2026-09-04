@@ -2046,21 +2046,20 @@
      (invested, cap, discount, dates) live in the app, not this sheet. Sorted
      by priority so the reader hits Immediate first. */
   var XL_TRACKER_COLS=[
-    {k:"num",h:"#",w:4,t:"n"},{k:"priority",h:"Priority",w:13},
-    {k:"company",h:"Company",w:15,t:"b"},{k:"issueTitle",h:"Title of Ongoing Issue",w:26},
+    {k:"company",h:"Company",w:15,t:"b"},{k:"priority",h:"Priority",w:13},
+    {k:"issueTitle",h:"Title of Ongoing Issue",w:26},
     {k:"situation",h:"Latest Situation",w:56},{k:"nextAction",h:"Next Action",w:46},
     {k:"closure",h:"Strategic Target",w:40},
     {k:"owner",h:"Owner",w:9},{k:"due",h:"Due / Next Review",w:16},
     {k:"legalNext",h:"Legal Next Step?",w:11},{k:"legalReq",h:"Legal Requirement",w:32},
     {k:"targetFeedback",h:"Target Feedback",w:13},{k:"vcTrack",h:"Value Creation Track",w:19},
     {k:"vcPlan",h:"Value Creation Plan",w:36},{k:"lastUpdated",h:"Last Updated",w:12,t:"d"}];
-  /* at: is an index into XL_TRACKER_COLS, so "#" at index 0 stays unbanded.
-     p: picks the XL_BANDS colour explicitly rather than by position, so LEGAL
-     keeps its bright red however many bands sit before it. */
+  /* at: is an index into XL_TRACKER_COLS. p: picks the XL_BANDS colour
+     explicitly rather than by position, so LEGAL keeps its bright red however
+     many bands sit before it. Last Updated is deliberately left unbanded. */
   var XL_TRACKER_BANDS=[
-    {t:"PORTFOLIO",at:1,span:2,p:0},{t:"STATUS & ACTION",at:3,span:6,p:1},
-    {t:"LEGAL",at:9,span:3,p:4},{t:"VALUE CREATION",at:12,span:2,p:5},
-    {t:"ADMIN",at:14,span:1,p:6}];
+    {t:"STATUS & ACTION",at:0,span:8,p:1},{t:"LEGAL",at:8,span:3,p:4},
+    {t:"VALUE CREATION",at:11,span:2,p:5}];
   var XL_HISTORY_COLS=[
     {k:"date",h:"Date",w:13,t:"d"},{k:"company",h:"Company",w:16,t:"b"},
     {k:"entry",h:"Entry",w:112},{k:"source",h:"Source",w:24}];
@@ -2074,7 +2073,7 @@
     var hist=state.history.slice().sort(function(a,b){
       return String(b.date).localeCompare(String(a.date)); });
     var blob=buildXlsx([
-      {name:"Portfolio Tracker", first:2, xSplit:5, cols:XL_TRACKER_COLS,
+      {name:"Portfolio Tracker", first:2, xSplit:4, cols:XL_TRACKER_COLS,
        bands:XL_TRACKER_BANDS, rows:rows, title:"Portfolio Tracker",
        sub:"Legal, Investment & Value Creation  |  "+
          rows.length+" portfolio item"+(rows.length===1?"":"s")+
