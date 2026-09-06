@@ -30,7 +30,7 @@ Production: https://portfolio-management-five-cyan.vercel.app
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | The whole application |
+| `index.html` | The whole application, including both exports |
 | `config.js` | Supabase URL and anon key |
 | `supabase-schema.sql` | Schema plus seed. Idempotent, safe to re-run |
 | `launch.sh` | Clears git locks and pushes |
@@ -239,5 +239,32 @@ colour only inside a media query. The two logos are base64 data URIs.
   got that for free — as the third of five it silently became maroon. `at:`
   indexes into `XL_TRACKER_COLS`, where index 0 is `#`, which stays unbanded.
 - Dates are written as Excel serials (`xlDate`, days since 1899-12-30).
+- **The status deck (`exportDeck`) is the second export**, the weekly PowerPoint
+  for the Chief Venture Officer, generated rather than rebuilt by hand. A
+  `.pptx` is a ZIP of XML parts exactly as an `.xlsx` is, so `zipStore()` is
+  shared — it takes an optional mime type for the two. Every shape is
+  absolutely positioned, which is what PowerPoint stores natively, so there is
+  no layout engine here: `dkLines()` only estimates how tall a table row must
+  be and PowerPoint does the real wrapping inside it. Geometry is in EMU,
+  914400 to the inch, on an A4 landscape slide.
+  - Four slides: title, CLASSIFICATION (priority and dependency counts),
+    DETAILED STATUS (a row per company), DECISIONS (a card per decision, two
+    to a slide, paginating beyond that and skipped entirely when nothing has
+    been decided). Slide 2's card heights are computed, not fixed, so a fourth
+    priority band cannot run off the bottom.
+  - **No images.** `zipStore()` encodes each part as UTF-8 text, so a PNG
+    cannot pass through it, and carrying the artwork would put base64 in the
+    page for every reader on every load. The brand is drawn instead.
+  - `DK_AWAIT` derives the decision card's pill from `dependency` rather than
+    storing it — the pill says who the decision sits with, which is what
+    dependency already records.
+  - Members are listed priority-then-alphabetical. The hand-built deck ordered
+    them by hand; a generated one must not reshuffle week to week.
+- The deck needs four fields beyond the tracker's: `dependency` (one of five
+  channels, `DK_DEPS`), `latest_status` (the one line slide 3 prints, distinct
+  from the long derived situation), and `decision` / `decision_next` for the
+  DECIDED cards. All four are edited from "Edit status & action". The
+  dependency picker carries a **blank first option** on purpose: without it a
+  company with no dependency would show the first channel and silently save it.
 - The row detail panel gets its width set in JavaScript (`fitDetail`) because the
   table is wider than the viewport and the panel lives in a sticky cell.

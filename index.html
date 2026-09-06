@@ -460,6 +460,7 @@
         <button class="btn btn-sm" id="clearF" type="button" hidden>Clear filters</button>
         <span class="spacer"></span>
         <button class="btn btn-sm" id="exportXlsx" type="button">Export Excel</button>
+        <button class="btn btn-sm" id="exportDeck" type="button">Export deck</button>
         <button class="btn btn-sm" id="printBtn" type="button">Print</button>
       </div>
       <div class="tscroll">
@@ -812,6 +813,10 @@
     /* situation is deliberately absent: Latest Situation is derived from the
        newest History entry, never stored on the company. */
     priority:"priority", nextAction:"next_action", closure:"closure", issueTitle:"issue_title", owner:"owner",
+    /* The status deck's fields: who we are waiting on, the one-line status it
+       prints, and the decision card when one has been taken. */
+    dependency:"dependency", latestStatus:"latest_status",
+    decision:"decision", decisionNext:"decision_next",
     due:"due", legalNext:"legal_next", legalReq:"legal_req", targetFeedback:"target_feedback",
     vcTrack:"vc_track", vcPlan:"vc_plan", lastUpdated:"last_updated", legalRaisedAt:"legal_raised_at" };
 
@@ -1436,6 +1441,17 @@
       '<div class="full"><label>Title of ongoing issue '+
         '<span class="hint-inline">one sentence, shown ahead of the situation on the exported tracker</span></label>'+
         '<input data-f="issueTitle" value="'+esc(c.issueTitle)+'"></div>'+
+      /* Blank first: without it a company with no dependency set would show
+         the first option and silently save it on the next edit. */
+      '<div><label>Waiting on</label>'+sel("dependency",[""].concat(DK_DEPS),c.dependency)+'</div>'+
+      '<div class="full"><label>Latest status '+
+        '<span class="hint-inline">one line, the deck\'s right-hand column</span></label>'+
+        '<input data-f="latestStatus" value="'+esc(c.latestStatus)+'"></div>'+
+      '<div class="full"><label>Decision taken '+
+        '<span class="hint-inline">fills a card on the deck\'s DECISIONS slide; leave empty if none</span></label>'+
+        '<textarea data-f="decision">'+esc(c.decision)+'</textarea></div>'+
+      '<div class="full"><label>Decision — next step</label>'+
+        '<input data-f="decisionNext" value="'+esc(c.decisionNext)+'"></div>'+
       '<div class="full"><label>Situation update '+
         '<span class="hint-inline">logged to History and becomes the Latest Situation; leave empty to keep the current one</span></label>'+
         '<textarea data-f="situation" placeholder="What has happened since '+
@@ -1720,7 +1736,9 @@
       var sitDate=(fv(w,"sitDate")||"").trim()||today();
       if(sit && !isYmd(sitDate)){ toast("The situation update date must look like 2026-09-02.","bad"); return; }
       var v={issueType:fv(w,"issueType"),priority:fv(w,"priority"),bucket:fv(w,"bucket"),owner:fv(w,"owner"),
-             due:fv(w,"due"),nextAction:fv(w,"nextAction"),closure:fv(w,"closure"),issueTitle:fv(w,"issueTitle")};
+             due:fv(w,"due"),nextAction:fv(w,"nextAction"),closure:fv(w,"closure"),issueTitle:fv(w,"issueTitle"),
+             dependency:fv(w,"dependency"),latestStatus:fv(w,"latestStatus"),
+             decision:fv(w,"decision"),decisionNext:fv(w,"decisionNext")};
       editing=null;
       v.lastUpdated=today();
       saveCompany(c.id, v, function(s){
@@ -1851,7 +1869,8 @@
     for(var i=0;i<b.length;i++) c=CRC_T[(c^b[i])&0xFF]^(c>>>8);
     return (c^0xFFFFFFFF)>>>0; }
 
-  function zipStore(files){
+  /* mime defaults to xlsx: the .pptx deck passes its own. */
+  function zipStore(files, mime){
     var enc=new TextEncoder(), parts=[], central=[], off=0;
     function u16(n){ return [n&0xFF,(n>>>8)&0xFF]; }
     function u32(n){ return [n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF]; }
@@ -1871,8 +1890,8 @@
     }
     var end=new Uint8Array([].concat(u32(0x06054b50),u16(0),u16(0),
       u16(files.length),u16(files.length),u32(cdLen),u32(off),u16(0)));
-    return new Blob(parts.concat(cd,[end]),
-      {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    return new Blob(parts.concat(cd,[end]), {type: mime ||
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
   }
 
   /* esc() emits only entities that are also legal XML. Control characters are
@@ -2082,10 +2101,337 @@
       {name:"History Log", first:1, cols:XL_HISTORY_COLS, rows:hist, title:"History Log",
        sub:"Dated record of what happened, so the tracker's Latest Situation can stay short."}
     ]);
+    dlBlob(blob, "portfolio-tracker-"+today()+".xlsx");
+  }
+
+  function dlBlob(blob, name){
     var url=URL.createObjectURL(blob), a=document.createElement("a");
-    a.href=url; a.download="portfolio-tracker-"+today()+".xlsx";
+    a.href=url; a.download=name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }
+
+  /* ---------- status deck export ----------
+     The weekly status deck for the Chief Venture Officer, generated rather
+     than rebuilt by hand every week. A .pptx is a ZIP of XML parts exactly as
+     an .xlsx is, so zipStore() is reused. Every shape is absolutely
+     positioned, which is what PowerPoint stores natively, so nothing here
+     needs a layout engine: dkLines() only estimates how tall a table row must
+     be, and PowerPoint still does the real wrapping inside it.
+
+     No images. zipStore() encodes each part as UTF-8 text, so a PNG cannot go
+     through it, and carrying the artwork would mean base64 in the page for
+     every reader on every load. The brand is drawn instead — the maroon
+     panel, the rule, the palette below. */
+  var DK_W=10689336, DK_H=7562088;               /* A4 landscape, in EMU */
+  var DKC={ maroon:"801A37", tan:"BA7334", gold:"EDAD3A", sand:"DAC299",
+            stone:"8C8C86", grey:"9A9A95", ink:"1A1A1A", cream:"F5EDE2",
+            rule:"E7DFD2", muted:"5B5B5B", dim:"C9C6C0", white:"FFFFFF",
+            blush:"F2E4E9" };
+  var DK_PRI_DOT={ "Immediate":DKC.maroon, "Near-Term":DKC.tan,
+                   "Postponed":DKC.sand, "No Action":DKC.grey };
+  /* The five channels a company can be waiting on, in the deck's order. */
+  var DK_DEPS=["Founders / Company","Legal Counsel","Internal — ISV / Board",
+               "No Dependency","Co-Investor (Misr Capital)"];
+  var DK_DEP_DOT={};
+  DK_DEP_DOT[DK_DEPS[0]]=DKC.maroon; DK_DEP_DOT[DK_DEPS[1]]=DKC.tan;
+  DK_DEP_DOT[DK_DEPS[2]]=DKC.gold;   DK_DEP_DOT[DK_DEPS[3]]=DKC.sand;
+  DK_DEP_DOT[DK_DEPS[4]]=DKC.stone;
+  /* The decision card's pill says who the decision now sits with, which is
+     what dependency already records — so it is derived rather than stored. */
+  var DK_AWAIT={};
+  DK_AWAIT[DK_DEPS[0]]="Awaiting the company"; DK_AWAIT[DK_DEPS[1]]="Awaiting counsel";
+  DK_AWAIT[DK_DEPS[2]]="Awaiting Board";       DK_AWAIT[DK_DEPS[3]]="Ready to proceed";
+  DK_AWAIT[DK_DEPS[4]]="Awaiting Misr Capital";
+
+  function dkEmu(i){ return Math.round(i*914400); }
+  function dkRun(t,sz,o){
+    o=o||{};
+    return '<a:r><a:rPr lang="en-US" sz="'+Math.round(sz*100)+'"'+(o.b?' b="1"':'')+
+      '><a:solidFill><a:srgbClr val="'+(o.c||DKC.ink)+'"/></a:solidFill>'+
+      '<a:latin typeface="'+(o.f||"Calibri")+'"/></a:rPr><a:t>'+xesc(t)+'</a:t></a:r>';
+  }
+  var dkSeq=0;
+  function dkSp(o){
+    var body=(o.runs&&o.runs.length)
+      ? '<a:p><a:pPr'+(o.align?' algn="'+o.align+'"':'')+'>'+
+        (o.line?'<a:lnSpc><a:spcPct val="'+Math.round(o.line*100000)+'"/></a:lnSpc>':'')+
+        '</a:pPr>'+o.runs.join("")+'</a:p>'
+      : '<a:p><a:endParaRPr lang="en-US"/></a:p>';
+    dkSeq++;
+    return '<p:sp><p:nvSpPr><p:cNvPr id="'+(dkSeq+1)+'" name="sh'+dkSeq+'"/>'+
+      '<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>'+
+      '<a:xfrm><a:off x="'+dkEmu(o.x)+'" y="'+dkEmu(o.y)+'"/>'+
+      '<a:ext cx="'+dkEmu(o.w)+'" cy="'+dkEmu(o.h)+'"/></a:xfrm>'+
+      '<a:prstGeom prst="'+(o.geom||"rect")+'"><a:avLst/></a:prstGeom>'+
+      (o.fill?'<a:solidFill><a:srgbClr val="'+o.fill+'"/></a:solidFill>':'<a:noFill/>')+
+      '</p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0"'+
+      ' anchor="'+(o.anchor||"t")+'"><a:noAutofit/></a:bodyPr><a:lstStyle/>'+
+      body+'</p:txBody></p:sp>';
+  }
+  /* Only used to size a row band. Calibri averages about .48em per character,
+     which is close enough to pick a line count; PowerPoint wraps for real. */
+  function dkLines(text,inches,pt){
+    var cpl=Math.max(8, Math.floor(inches/(pt*0.48/72)));
+    var w=String(text||"").split(/\s+/).filter(Boolean), n=1, len=0;
+    for(var i=0;i<w.length;i++){
+      var add=(len?1:0)+w[i].length;
+      if(len+add>cpl && len){ n++; len=w[i].length; } else len+=add;
+    }
+    return n;
+  }
+  function dkMonth(){
+    var M=["January","February","March","April","May","June","July","August",
+           "September","October","November","December"];
+    var t=today().split("-"); return M[(+t[1])-1]+" "+t[0];
+  }
+  function dkBrand(){ return dkSp({x:0.55,y:0.45,w:0.08,h:0.62,fill:DKC.maroon}); }
+  function dkHead(title,sub){
+    return dkSp({x:1.30,y:0.42,w:9.84,h:0.50,
+      runs:[dkRun(title,21,{b:true}), dkRun("   "+sub,12.5,{c:DKC.muted})]});
+  }
+  function dkFooter(n){
+    return dkSp({x:6.94,y:7.68,w:4.00,h:0.30,align:"r",
+      runs:[dkRun("Legal, Investment & Value Creation"+(n?"   "+n:""),11,{b:true})]});
+  }
+  function dkSlide(shapes){
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '+
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '+
+      'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'+
+      '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/>'+
+      '<p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/>'+
+      '<a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/>'+
+      '</a:xfrm></p:grpSpPr>'+shapes.join("")+'</p:spTree></p:cSld>'+
+      '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>';
+  }
+
+  function deckSlides(){
+    var rows=visible().slice().sort(function(a,b){
+      return (sortVal(a,"priority")-sortVal(b,"priority")) ||
+             String(a.company).localeCompare(String(b.company)); });
+    var S=[], n=rows.length;
+
+    /* 1 — title */
+    S.push(dkSlide([
+      dkSp({x:0,y:0,w:7.05,h:8.27,fill:DKC.maroon}),
+      dkSp({x:2.75,y:3.55,w:8.40,h:2.35,fill:DKC.ink}),
+      dkSp({x:3.20,y:3.90,w:7.60,h:1.05,
+            runs:[dkRun("Portfolio Status Update",32,{b:true,c:DKC.white})]}),
+      dkSp({x:3.20,y:5.05,w:7.60,h:0.45,
+            runs:[dkRun(dkMonth()+"  |  Legal, Investment & Value Creation",14,
+                        {c:DKC.blush})]}),
+      dkSp({x:7.15,y:7.85,w:3.99,h:0.30,align:"r",
+            runs:[dkRun("Legal, Investment & Value Creation",11,{b:true})]})
+    ]));
+
+    /* 2 — classification. Card heights are computed rather than fixed so a
+       fourth priority band (Postponed) cannot run off the bottom. */
+    var sh=[dkBrand(), dkHead("CLASSIFICATION",
+      "Priority & dependency breakdown  |  "+n+" item"+(n===1?"":"s")),
+      dkSp({x:0.55,y:1.55,w:5.15,h:0.30,runs:[dkRun("PRIORITY",11,{b:true,c:DKC.maroon})]}),
+      dkSp({x:6.10,y:1.55,w:5.04,h:0.30,
+            runs:[dkRun("DEPENDENCY ON OTHERS",11,{b:true,c:DKC.maroon})]})];
+    var pri=state.lists.priority.filter(function(p){
+      return rows.some(function(c){ return c.priority===p; }); });
+    var ph=Math.min(1.74,(5.55-(pri.length-1)*0.165)/Math.max(1,pri.length));
+    pri.forEach(function(p,i){
+      var m=rows.filter(function(c){ return c.priority===p; })
+                .map(function(c){ return c.company; });
+      var y=1.95+i*(ph+0.165);
+      sh.push(dkSp({x:0.55,y:y,w:5.15,h:ph,fill:DKC.ink}));
+      sh.push(dkSp({x:0.80,y:y+0.08,w:1.10,h:ph-0.16,anchor:"ctr",
+        runs:[dkRun(String(m.length),30,{c:DKC.gold,f:"Arial Black"})]}));
+      sh.push(dkSp({x:1.90,y:y+0.18,w:0.13,h:0.13,geom:"ellipse",
+        fill:DK_PRI_DOT[p]||DKC.grey}));
+      sh.push(dkSp({x:2.10,y:y+0.09,w:3.40,h:0.32,
+        runs:[dkRun(p,14.5,{b:true,c:DKC.white})]}));
+      sh.push(dkSp({x:1.90,y:y+0.42,w:3.55,h:ph-0.5,line:1.3,
+        runs:[dkRun(m.join(", "),9.5,{c:DKC.dim})]}));
+    });
+    var dep=DK_DEPS.filter(function(d){
+      return rows.some(function(c){ return c.dependency===d; }); });
+    var dh=Math.min(1.01,(5.55-(dep.length-1)*0.125)/Math.max(1,dep.length));
+    dep.forEach(function(d,i){
+      var m=rows.filter(function(c){ return c.dependency===d; })
+                .map(function(c){ return c.company; });
+      var y=1.95+i*(dh+0.125);
+      sh.push(dkSp({x:6.10,y:y,w:5.04,h:dh,fill:DKC.cream}));
+      sh.push(dkSp({x:6.30,y:y+0.44,w:0.13,h:0.13,geom:"ellipse",
+        fill:DK_DEP_DOT[d]||DKC.grey}));
+      sh.push(dkSp({x:6.52,y:y+0.07,w:4.04,h:0.28,runs:[dkRun(d,12,{b:true})]}));
+      sh.push(dkSp({x:10.59,y:y,w:0.40,h:dh,anchor:"ctr",align:"r",
+        runs:[dkRun(String(m.length),16,{b:true,c:DKC.maroon})]}));
+      sh.push(dkSp({x:6.52,y:y+0.34,w:4.14,h:dh-0.4,line:1.25,
+        runs:[dkRun(m.join(", "),9,{c:DKC.muted})]}));
+    });
+    sh.push(dkFooter(2)); S.push(dkSlide(sh));
+
+    /* 3 — detailed status */
+    sh=[dkBrand(), dkHead("DETAILED STATUS",
+      "Company-level issue & latest status  |  "+n+" item"+(n===1?"":"s")),
+      dkSp({x:0.55,y:1.55,w:10.59,h:0.32,fill:DKC.ink}),
+      dkSp({x:0.63,y:1.55,w:1.37,h:0.32,anchor:"ctr",
+        runs:[dkRun("COMPANY",8.5,{b:true,c:DKC.gold})]}),
+      dkSp({x:2.20,y:1.55,w:0.87,h:0.32,anchor:"ctr",
+        runs:[dkRun("PRIORITY",8.5,{b:true,c:DKC.gold})]}),
+      dkSp({x:3.30,y:1.55,w:3.17,h:0.32,anchor:"ctr",
+        runs:[dkRun("ISSUE CURRENTLY ADDRESSED",8.5,{b:true,c:DKC.gold})]}),
+      dkSp({x:6.73,y:1.55,w:4.41,h:0.32,anchor:"ctr",
+        runs:[dkRun("LATEST STATUS",8.5,{b:true,c:DKC.gold})]})];
+    var hs=rows.map(function(c){
+      return Math.max(0.32, Math.max(dkLines(c.issueTitle,3.15,8.5),
+                                     dkLines(c.latestStatus,4.41,8.5))*0.148+0.13); });
+    var sum=hs.reduce(function(a,b){ return a+b; },0), avail=5.50;
+    if(sum>avail){ var k=avail/sum; hs=hs.map(function(h){ return h*k; }); }
+    var y=1.90;
+    rows.forEach(function(c,i){
+      if(i%2===1) sh.push(dkSp({x:0.55,y:y,w:10.59,h:hs[i],fill:DKC.cream}));
+      sh.push(dkSp({x:0.63,y:y,w:1.35,h:hs[i],
+        runs:[dkRun(c.company,9.5,{b:true,c:DKC.maroon})]}));
+      sh.push(dkSp({x:2.12,y:y+0.06,w:0.09,h:0.09,geom:"ellipse",
+        fill:DK_PRI_DOT[c.priority]||DKC.grey}));
+      sh.push(dkSp({x:2.28,y:y,w:0.79,h:hs[i],runs:[dkRun(c.priority,8.5)]}));
+      sh.push(dkSp({x:3.22,y:y,w:3.15,h:hs[i],line:1.25,
+        runs:[dkRun(c.issueTitle||"—",8.5)]}));
+      sh.push(dkSp({x:6.65,y:y,w:4.41,h:hs[i],line:1.25,
+        runs:[dkRun(c.latestStatus||"—",8.5,{c:DKC.muted})]}));
+      y+=hs[i];
+    });
+    sh.push(dkFooter(3)); S.push(dkSlide(sh));
+
+    /* 4 — decisions, two cards to a slide. Skipped entirely when nothing has
+       been decided, rather than shipping an empty slide. */
+    var dec=rows.filter(function(c){ return String(c.decision||"").trim(); });
+    for(var p0=0;p0<dec.length;p0+=2){
+      var pair=dec.slice(p0,p0+2);
+      var ds=[dkBrand(), dkHead("DECISIONS",
+        "Ready to move forward — internal decision complete")];
+      pair.forEach(function(c,j){
+        var x=0.55+j*5.54;
+        ds.push(dkSp({x:x,y:1.75,w:5.04,h:5.20,fill:DKC.cream}));
+        ds.push(dkSp({x:x+0.45,y:2.15,w:3.00,h:0.34,
+          runs:[dkRun("DECIDED",11,{b:true,c:DKC.tan})]}));
+        ds.push(dkSp({x:x+0.45,y:2.53,w:4.14,h:0.65,
+          runs:[dkRun(c.company,26,{b:true,c:DKC.maroon})]}));
+        ds.push(dkSp({x:x+0.45,y:3.30,w:4.14,h:1.60,line:1.25,
+          runs:[dkRun(c.decision,15)]}));
+        ds.push(dkSp({x:x+0.45,y:5.10,w:4.14,h:0.02,fill:DKC.rule}));
+        ds.push(dkSp({x:x+0.45,y:5.30,w:4.14,h:0.80,line:1.25,
+          runs:[dkRun(c.decisionNext||"",13,{c:DKC.muted})]}));
+        ds.push(dkSp({x:x+0.45,y:6.15,w:3.00,h:0.46,fill:j?DKC.tan:DKC.maroon}));
+        ds.push(dkSp({x:x+0.45,y:6.15,w:3.00,h:0.46,anchor:"ctr",align:"ctr",
+          runs:[dkRun(DK_AWAIT[c.dependency]||"Next step agreed",12,
+                      {b:true,c:DKC.white})]}));
+      });
+      ds.push(dkFooter(S.length+1)); S.push(dkSlide(ds));
+    }
+    return S;
+  }
+
+  function buildPptx(slides){
+    var NS_R="http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    var rel=function(id,type,tgt){
+      return '<Relationship Id="'+id+'" Type="'+NS_R+'/'+type+'" Target="'+tgt+'"/>'; };
+    var rels=function(body){
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+        body+'</Relationships>'; };
+    var P="application/vnd.openxmlformats-officedocument.presentationml";
+    var files=[
+      {name:"[Content_Types].xml", xml:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+        '<Default Extension="xml" ContentType="application/xml"/>'+
+        '<Override PartName="/ppt/presentation.xml" ContentType="'+P+'.presentation.main+xml"/>'+
+        '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="'+P+'.slideMaster+xml"/>'+
+        '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="'+P+'.slideLayout+xml"/>'+
+        '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'+
+        slides.map(function(_,i){ return '<Override PartName="/ppt/slides/slide'+(i+1)+
+          '.xml" ContentType="'+P+'.slide+xml"/>'; }).join("")+'</Types>'},
+      {name:"_rels/.rels", xml:rels(rel("rId1","officeDocument","ppt/presentation.xml"))},
+      {name:"ppt/presentation.xml", xml:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '+
+        'xmlns:r="'+NS_R+'" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'+
+        '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'+
+        '<p:sldIdLst>'+slides.map(function(_,i){
+          return '<p:sldId id="'+(256+i)+'" r:id="rId'+(i+2)+'"/>'; }).join("")+'</p:sldIdLst>'+
+        '<p:sldSz cx="'+DK_W+'" cy="'+DK_H+'"/><p:notesSz cx="'+DK_H+'" cy="'+DK_W+'"/>'+
+        '</p:presentation>'},
+      {name:"ppt/_rels/presentation.xml.rels", xml:rels(
+        rel("rId1","slideMaster","slideMasters/slideMaster1.xml")+
+        slides.map(function(_,i){
+          return rel("rId"+(i+2),"slide","slides/slide"+(i+1)+".xml"); }).join(""))},
+      {name:"ppt/slideMasters/slideMaster1.xml",
+       xml:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '+
+        'xmlns:r="'+NS_R+'" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'+
+        '<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'+
+        '<a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'+
+        '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>'+
+        '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" '+
+        'accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" '+
+        'accent6="accent6" hlink="hlink" folHlink="folHlink"/>'+
+        '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'+
+        '</p:sldMaster>'},
+      {name:"ppt/slideMasters/_rels/slideMaster1.xml.rels", xml:rels(
+        rel("rId1","slideLayout","../slideLayouts/slideLayout1.xml")+
+        rel("rId2","theme","../theme/theme1.xml"))},
+      {name:"ppt/slideLayouts/slideLayout1.xml",
+       xml:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '+
+        'xmlns:r="'+NS_R+'" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '+
+        'type="blank" preserve="1"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr>'+
+        '<p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'+
+        '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>'},
+      {name:"ppt/slideLayouts/_rels/slideLayout1.xml.rels", xml:rels(
+        rel("rId1","slideMaster","../slideMasters/slideMaster1.xml"))},
+      {name:"ppt/theme/theme1.xml", xml:dkTheme()}
+    ];
+    slides.forEach(function(x,i){
+      files.push({name:"ppt/slides/slide"+(i+1)+".xml", xml:x});
+      files.push({name:"ppt/slides/_rels/slide"+(i+1)+".xml.rels", xml:rels(
+        rel("rId1","slideLayout","../slideLayouts/slideLayout1.xml"))});
+    });
+    return zipStore(files,
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+  }
+
+  /* A theme is not optional: PowerPoint refuses a deck without one. The lists
+     inside fmtScheme must each carry exactly three entries. */
+  function dkTheme(){
+    var f='<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>';
+    var ln='<a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">'+f+
+           '<a:prstDash val="solid"/></a:ln>';
+    var ef='<a:effectStyle><a:effectLst/></a:effectStyle>';
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="BMV">'+
+      '<a:themeElements><a:clrScheme name="BMV">'+
+      '<a:dk1><a:srgbClr val="'+DKC.ink+'"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>'+
+      '<a:dk2><a:srgbClr val="'+DKC.maroon+'"/></a:dk2>'+
+      '<a:lt2><a:srgbClr val="'+DKC.cream+'"/></a:lt2>'+
+      '<a:accent1><a:srgbClr val="'+DKC.maroon+'"/></a:accent1>'+
+      '<a:accent2><a:srgbClr val="'+DKC.tan+'"/></a:accent2>'+
+      '<a:accent3><a:srgbClr val="'+DKC.gold+'"/></a:accent3>'+
+      '<a:accent4><a:srgbClr val="'+DKC.sand+'"/></a:accent4>'+
+      '<a:accent5><a:srgbClr val="'+DKC.stone+'"/></a:accent5>'+
+      '<a:accent6><a:srgbClr val="'+DKC.muted+'"/></a:accent6>'+
+      '<a:hlink><a:srgbClr val="'+DKC.maroon+'"/></a:hlink>'+
+      '<a:folHlink><a:srgbClr val="'+DKC.muted+'"/></a:folHlink></a:clrScheme>'+
+      '<a:fontScheme name="BMV">'+
+      '<a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>'+
+      '<a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>'+
+      '</a:fontScheme><a:fmtScheme name="BMV">'+
+      '<a:fillStyleLst>'+f+f+f+'</a:fillStyleLst>'+
+      '<a:lnStyleLst>'+ln+ln+ln+'</a:lnStyleLst>'+
+      '<a:effectStyleLst>'+ef+ef+ef+'</a:effectStyleLst>'+
+      '<a:bgFillStyleLst>'+f+f+f+'</a:bgFillStyleLst>'+
+      '</a:fmtScheme></a:themeElements></a:theme>';
+  }
+
+  function exportDeck(){
+    dkSeq=0;
+    dlBlob(buildPptx(deckSlides()), "portfolio-status-"+today()+".pptx");
   }
 
   /* ---------- shell ---------- */
@@ -2282,6 +2628,10 @@
     $("exportXlsx").addEventListener("click",function(){
       try{ exportXlsx(); }
       catch(e){ toast("Could not build the Excel file.","bad"); }
+    });
+    $("exportDeck").addEventListener("click",function(){
+      try{ exportDeck(); }
+      catch(e){ toast("Could not build the deck.","bad"); }
     });
 
     document.addEventListener("keydown",function(e){
