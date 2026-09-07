@@ -513,10 +513,30 @@ export function buildBrief({ companies, history, today }) {
     .map(c => ({ c, d: daysFrom(now, c.due) }))
     .filter(x => x.d !== null && x.d <= 7)
     .sort((a, b) => a.d - b.d);
-  const noExtNames = overdue.filter(c => !c.extended_to).map(c => c.company);
+  const noExt = overdue.filter(c => !c.extended_to);
+  const noExtNames = noExt.map(c => c.company);
+  const exposure = ccy => byNum
+    .filter(c => c.ccy === ccy && overdueDays(now, c) !== null && !c.extended_to)
+    .reduce((n, c) => n + (Number(c.invested) || 0), 0);
+  const principal = [['USD', exposure('USD')], ['EGP', exposure('EGP')]]
+    .filter(([, v]) => v).map(([k, v]) => `${k} ${money(v)}`).join(' and ');
+  /* The same two facts as plain strings, for the PDF. The email and the PDF
+     have to carry the same content or they drift, and the PDF is now the one
+     that actually gets sent. */
+  const standingText = [
+    noExtNames.length
+      ? `${noExtNames.length} note${noExtNames.length === 1 ? '' : 's'} past maturity with `
+        + `no signed extension${principal ? ', ' + principal + ' of principal' : ''}. `
+        + `${noExtNames.join(', ')}.`
+      : 'Every note is within term or covered by a signed extension.',
+    dueSoon.length
+      ? 'Due inside a week: '
+        + dueSoon.map(x => `${x.c.company} (${x.c.due})`).join(', ') + '.'
+      : '',
+  ].filter(Boolean);
   const standing = [
     noExtNames.length
-      ? `<b style="color:${C.crit};">${noExtNames.length} note${noExtNames.length === 1 ? '' : 's'} past maturity</b> with no signed extension — ${esc(noExtNames.join(', '))}.`
+      ? `<b style="color:${C.crit};">${noExtNames.length} note${noExtNames.length === 1 ? '' : 's'} past maturity</b> with no signed extension${principal ? ', ' + esc(principal) + ' of principal' : ''} — ${esc(noExtNames.join(', '))}.`
       : 'Every note is within term or covered by a signed extension.',
     dueSoon.length
       ? `<b>Due inside a week:</b> ${esc(dueSoon.map(x => `${x.c.company} (${x.c.due})`).join(', '))}.`
@@ -667,48 +687,25 @@ export function buildBrief({ companies, history, today }) {
     chasing.forEach(c => { onADesk[c.company] = 1; });
   });
   const orphanRows = byNum.filter(c => !onADesk[c.company]);
-  /* An executive summary earns its space only if it says what the reader would
-     otherwise have to assemble: the exposure, what is late, and who owes what.
-     All three fall out of data already gathered above. */
-  const noExt = overdue.filter(c => !c.extended_to);
-  const lateOrDue = byNum
-    .map(c => ({ c, d: daysFrom(now, c.due) }))
-    .filter(x => x.d !== null && x.d <= 7)
-    .sort((a, b) => a.d - b.d);
-  const exposure = ccy => byNum
-    .filter(c => c.ccy === ccy && overdueDays(now, c) !== null && !c.extended_to)
-    .reduce((n, c) => n + (Number(c.invested) || 0), 0);
-  const summary = [
-    ['Position', topline],
-    ['Past maturity', noExt.length
-      ? `${noExt.length} of ${byNum.length} notes sit past maturity with no signed extension`
-        + `${exposure('USD') ? `, USD ${money(exposure('USD'))} of principal` : ''}`
-        + `${exposure('EGP') ? ` and EGP ${money(exposure('EGP'))}` : ''}`
-        + `. ${noExt.slice(0, 5).map(c => c.company).join(', ')}`
-        + `${noExt.length > 5 ? ' and others' : ''}.`
-      : 'Every note is either within term or covered by a signed extension.'],
-    ['Due inside a week', lateOrDue.length
-      ? lateOrDue.slice(0, 5).map(x => `${x.c.company} (${x.d < 0 ? Math.abs(x.d) + 'd late'
-          : x.d === 0 ? 'today' : x.d + 'd'})`).join(', ') + '.'
-      : 'Nothing falls due in the next seven days.'],
-    ['Desks', DESKS.map(dk => {
-        const { mine, chasing } = deskRows(dk);
-        return `${dk.who} ${mine.length ? mine.length + ' to act'
-                : chasing.length ? 'chasing only' : 'clear'}`;
-      }).join(', ') + '.'],
-  ];
-
   const pdfData = {
-    now, lastEdited, topline, greeting: greeting(now), firstThings, summary,
+    now, lastEdited, topline, greeting: greeting(now), firstThings, standingText,
     desks: pdfDesks,
     orphans: orphanRows.length
       ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
           mine: [], waiting: orphanRows.map(forCompany) }
       : null,
-    moved: moved.map(h => ({
+    moved: movedReal.map(h => ({
       company: h.company || 'General',
       when: dmy(h.entry_date) + (h.source ? '  -  ' + h.source : ''),
       entry: String(h.entry).replace(/^[•\-]\s*/, ''),
+    })),
+    ticked: movedDone.length
+      ? movedDone.map(h => h.company).filter((v, i, a) => a.indexOf(v) === i).join(', ')
+        + '  -  ' + movedDone.length + ' action' + (movedDone.length === 1 ? '' : 's')
+      : '',
+    decided: decided.map(c => ({
+      company: c.company, decision: c.decision, next: c.decision_next || '',
+      pill: AWAIT[c.dependency] || 'agreed',
     })),
   };
 
@@ -853,7 +850,8 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, topline, greeting, firstThings, summary,
+export function briefPdf({ now, lastEdited, topline, greeting, firstThings, standingText,
+  ticked, decided,
                            desks, moved, orphans }) {
   const P = {
     page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
@@ -904,21 +902,11 @@ export function briefPdf({ now, lastEdited, topline, greeting, firstThings, summ
 
   d.para(greeting, { size: 10, colour: P.mid, after: 16 });
 
-  section('Executive summary',
-    'The position in one view: what the portfolio looks like this morning, what is '
-  + 'past its maturity date, what falls due inside the week, and who is holding '
-  + 'work. Everything after this section is the detail behind it.',
-    { newPage: false });
-
-  (summary || []).forEach(([label, text]) => d.keepTogether(() => {
-    d.textAt(label.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.faint });
-    d.y += 11;
-    d.para(text, { size: 10, colour: P.ink, after: 11 });
-  }));
-
-  /* The counts that used to sit here said nothing about what to do. Open on
-     the one thing each desk has to move, and why it is stuck. */
-  d.y += 4;
+  /* No executive summary. It restated in four labelled blocks what the rest of
+     the page already says, and pushed the first actual instruction below the
+     fold. The brief opens on the one thing each desk has to move and why it is
+     stuck; the standing totals it used to carry are at the foot. */
+  d.para(topline, { size: 9.5, colour: P.mid, after: 16 });
   (firstThings || []).forEach(f => d.keepTogether(() => {
     d.textAt(f.who.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.crit });
     d.y += 11;
@@ -927,6 +915,39 @@ export function briefPdf({ now, lastEdited, topline, greeting, firstThings, summ
              + (f.rest ? '   (+' + f.rest + ' more)' : ''),
            { size: 8.5, colour: P.faint, after: 11 });
   }));
+
+  /* ------------------------------------------------- what moved ---- */
+  /* Same order as the email: the day's movement first, then what is settled,
+     then the desks. */
+  if ((moved || []).length) {
+    section('What moved',
+      `Every entry logged across the portfolio in the last three days, newest first, `
+      + `${moved.length} in all. This is the record; the desks below are what to do `
+      + 'about it.');
+    moved.forEach(m => d.keepTogether(() => {
+      d.rule(P.line, { after: 8 });
+      d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
+      d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
+      d.y += 13;
+      d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
+    }));
+    if (ticked) d.para('Also ticked off: ' + ticked + '.',
+                       { size: 8.5, colour: P.faint, after: 4 });
+  }
+
+  /* --------------------------------------------------- decisions ---- */
+  if ((decided || []).length) {
+    section('Decided, awaiting sign-off',
+      'Settled on our side. What each one is now waiting on.');
+    decided.forEach(x => d.keepTogether(() => {
+      d.rule(P.line, { after: 8 });
+      d.textAt(x.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
+      d.textRight(x.pill, R, d.y, { size: 7.5, bold: true, colour: P.gold });
+      d.y += 13;
+      d.para(x.decision, { size: 9.5, colour: P.ink, after: 3 });
+      if (x.next) d.para(x.next, { size: 8.5, colour: P.faint, after: 4 });
+    }));
+  }
 
   /* ----------------------------------------------------- the desks ---- */
   /* A grid, matching the email. Columns are fixed so the eye can run down
@@ -997,19 +1018,12 @@ export function briefPdf({ now, lastEdited, topline, greeting, firstThings, summ
     }
   });
 
-  /* -------------------------------------------------- what moved ---- */
-  if (moved.length) {
-    section('Moved in the last three days',
-      'Every entry logged across the portfolio in the last three days, newest first, '
-      + `${moved.length} in all. This is the raw record; the desks above are what to `
-      + 'do about it.');
-    moved.forEach(m => d.keepTogether(() => {
-      d.rule(P.line, { after: 8 });
-      d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
-      d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
-      d.y += 13;
-      d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
-    }));
+  /* ------------------------------------------------------ standing ---- */
+  /* What has not changed, once, at the end -- where the executive summary used
+     to put it at the front. */
+  if ((standingText || []).length) {
+    section('Standing', 'Unchanged risk, stated once.');
+    standingText.forEach(t => d.para(t, { size: 9.5, colour: P.mid, after: 6 }));
   }
 
   return d.toBuffer((doc, page, total) => {
