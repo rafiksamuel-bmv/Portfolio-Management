@@ -267,7 +267,7 @@ export function buildBrief({ companies, history, today }) {
      true, none of it a reason to do anything, and the same numbers most
      mornings. The brief opens instead with the one thing on each desk that
      matters most today and why it is stuck, which is what a 7am reader is
-     actually looking for. The standing totals live at the foot. */
+     actually looking for. */
   const counts = {};
   ['Pending legal', 'Pending company', 'Pending our action'].forEach(k => {
     counts[k] = byNum.filter(c => c.status === k).length; });
@@ -275,9 +275,9 @@ export function buildBrief({ companies, history, today }) {
   const movedReal = moved.filter(h => h.source !== DONE_SRC);
   const movedDone = moved.filter(h => h.source === DONE_SRC);
 
-  /* No standing sentence above the desks. Counting the work is not the same as
-     saying what it is, and the desk lines below say it. totalActions survives
-     only for the subject line, where a number does earn its place. */
+  /* Nothing sits above the desks. Counting the work is not the same as saying
+     what it is. totalActions survives only for the subject line, where a
+     number does earn its place. */
   const totalActions = DESKS.reduce((n, d) => n + deskRows(d).mine.length, 0);
 
   const section = (title, sub) =>
@@ -325,13 +325,10 @@ export function buildBrief({ companies, history, today }) {
 
   /* A company can sit on several desks with different work, which is the
      point. What must not repeat with it is the metadata: the lateness badge,
-     the status pill and the due date were being reprinted on every copy, and
-     between them they were most of the brief's length. Maturity now lives in
-     one standing line at the foot, the status pill is implied by the desk you
-     are reading, and the due date appears only when it is actually near. */
+     the status pill and the due date were reprinted on every copy and between
+     them were most of the brief's length. All three are gone -- a row is the
+     company, what that person has to do, and one line saying why. */
   function gridRow(c, actions, i) {
-    const due = daysFrom(now, c.due);
-    const hot = due !== null && due <= 7;
     const zebra = i % 2 ? C.soft : 'transparent';
     const ctx = statusLine(c, latestEntry(history, c));
     return `<tr>
@@ -348,12 +345,6 @@ export function buildBrief({ companies, history, today }) {
         ${ctx ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;
           margin-top:3px;">${esc(ctx.slice(0, 150))}</div>` : ''}
       </td>
-      <td valign="top" align="right" bgcolor="${zebra}" width="92"
-          style="padding:9px 10px;border-bottom:1px solid ${C.line};background:${zebra};
-                 white-space:nowrap;">
-        ${hot ? `<div style="font-size:9.5px;font-family:${MONO};color:${C.crit};
-             font-weight:700;">${esc(c.due)}</div>` : ''}
-      </td>
     </tr>`;
   }
 
@@ -363,7 +354,6 @@ export function buildBrief({ companies, history, today }) {
     <td style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
         letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">WHAT TO DO</td>
     <td align="right" style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
-        letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">DUE</td>
   </tr>`;
 
   function deskBlock(desk) {
@@ -463,45 +453,6 @@ export function buildBrief({ companies, history, today }) {
         pill(AWAIT[c.dependency] || 'agreed', C.ok, C.okBg)}</td>
     </tr>`).join('');
 
-  /* ---- standing risks ----
-     Nine notes past maturity is real but it has not changed in 14 months. It
-     was a red badge on every desk row AND a section of its own, so the loudest
-     thing in the brief was also the least new. Once, at the foot. */
-  const dueSoon = byNum
-    .map(c => ({ c, d: daysFrom(now, c.due) }))
-    .filter(x => x.d !== null && x.d <= 7)
-    .sort((a, b) => a.d - b.d);
-  const noExt = overdue.filter(c => !c.extended_to);
-  const noExtNames = noExt.map(c => c.company);
-  const exposure = ccy => byNum
-    .filter(c => c.ccy === ccy && overdueDays(now, c) !== null && !c.extended_to)
-    .reduce((n, c) => n + (Number(c.invested) || 0), 0);
-  const principal = [['USD', exposure('USD')], ['EGP', exposure('EGP')]]
-    .filter(([, v]) => v).map(([k, v]) => `${k} ${money(v)}`).join(' and ');
-  /* The same two facts as plain strings, for the PDF. The email and the PDF
-     have to carry the same content or they drift, and the PDF is now the one
-     that actually gets sent. */
-  const standingText = [
-    noExtNames.length
-      ? `${noExtNames.length} note${noExtNames.length === 1 ? '' : 's'} past maturity with `
-        + `no signed extension${principal ? ', ' + principal + ' of principal' : ''}. `
-        + `${noExtNames.join(', ')}.`
-      : 'Every note is within term or covered by a signed extension.',
-    dueSoon.length
-      ? 'Due inside a week: '
-        + dueSoon.map(x => `${x.c.company} (${x.c.due})`).join(', ') + '.'
-      : '',
-  ].filter(Boolean);
-  const standing = [
-    noExtNames.length
-      ? `<b style="color:${C.crit};">${noExtNames.length} note${noExtNames.length === 1 ? '' : 's'} past maturity</b> with no signed extension${principal ? ', ' + esc(principal) + ' of principal' : ''} — ${esc(noExtNames.join(', '))}.`
-      : 'Every note is within term or covered by a signed extension.',
-    dueSoon.length
-      ? `<b>Due inside a week:</b> ${esc(dueSoon.map(x => `${x.c.company} (${x.c.due})`).join(', '))}.`
-      : '',
-  ].filter(Boolean).map(t =>
-    `<div style="font-size:12px;color:${C.mid};line-height:1.6;">${t}</div>`).join('');
-
   const html =
 `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -566,8 +517,6 @@ export function buildBrief({ companies, history, today }) {
         : `${movedReal.length} entr${movedReal.length === 1 ? 'y' : 'ies'} in the last three days`)}
   <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table>${tickedLine}</td></tr>
 
-  ${section('Standing', 'Unchanged risk, stated once')}
-  <tr><td style="padding:0 28px 6px;">${standing}</td></tr>
 
   <tr><td style="padding:18px 28px 24px;border-top:1px solid ${C.line};">
     <div style="font-size:11.5px;color:${C.faint};line-height:1.6;">
@@ -588,33 +537,15 @@ export function buildBrief({ companies, history, today }) {
 
   /* The same content the HTML shows, as plain data, so the PDF is laid out
      from the brief rather than converted from its markup. */
-  const forCompany = c => {
-    const last = latestEntry(history, c);
-    const due = daysFrom(now, c.due);
-    const od = overdueLabel(now, c);
-    return {
-      company: c.company, status: c.status,
-      meta: `${effMaturity(c) ? 'matures ' + dmy(effMaturity(c)) : 'no maturity'}`
-            + `${od ? '  -  ' + od : ''}`,
-      metaShort: (() => {
-        const days = overdueDays(now, c);
-        if (days === null) return effMaturity(c) ? dmy(effMaturity(c)) : '-';
-        const mo = Math.floor(days / 30.44);
-        return mo >= 1 ? mo + 'mo late' : days + 'd late';   /* 0mo late reads as nothing */
-      })(),
-      overdue: !!od,
-      stands: statusLine(c, last),
-      standsWhen: last ? dmy(last.entry_date) + (last.source ? '  -  ' + last.source : '') : '',
-      ask: (c.legal_req && c.status === 'Pending legal') ? c.legal_req : '',
-      due: c.due ? 'due ' + c.due + (due !== null && due <= 7
-            ? '  -  ' + (due < 0 ? Math.abs(due) + ' days late' : due === 0 ? 'today' : due + ' days')
-            : '') : 'no date set',
-      dueHot: due !== null && due <= 7,
-      actions: toLines(c.next_action),
-      done: doneRecent(history, c).map(h =>
-        String(h.entry).replace(/^Completed:\s*/, '') + '  (' + dmy(h.entry_date) + ')'),
-    };
-  };
+  /* Only what the PDF renders. It used to carry the maturity label, the status
+     and the due date as well, all of which came off the desk rows with the
+     Standing section. */
+  const forCompany = c => ({
+    company: c.company,
+    stands: statusLine(c, latestEntry(history, c)),
+    actions: toLines(c.next_action),
+  });
+
   const pdfDesks = DESKS.map(desk => {
     const { mine, chasing } = deskRows(desk);
     return {
@@ -633,7 +564,7 @@ export function buildBrief({ companies, history, today }) {
   });
   const orphanRows = byNum.filter(c => !onADesk[c.company]);
   const pdfData = {
-    now, lastEdited, greeting: greeting(now), standingText,
+    now, lastEdited, greeting: greeting(now),
     desks: pdfDesks,
     orphans: orphanRows.length
       ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
@@ -792,7 +723,7 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, greeting, standingText,
+export function briefPdf({ now, lastEdited, greeting,
   ticked, decided,
                            desks, moved, orphans }) {
   const P = {
@@ -847,7 +778,7 @@ export function briefPdf({ now, lastEdited, greeting, standingText,
   /* No executive summary. It restated in four labelled blocks what the rest of
      the page already says, and pushed the first actual instruction below the
      fold. The brief opens on the one thing each desk has to move and why it is
-     stuck; the standing totals it used to carry are at the foot. */
+     stuck. */
   /* ----------------------------------------------------- the desks ---- */
   /* A grid, matching the email. Columns are fixed so the eye can run down
      them; each row is measured and kept whole. */
@@ -855,7 +786,6 @@ export function briefPdf({ now, lastEdited, greeting, standingText,
   const gridHeader = () => {
     d.textAt('COMPANY', d.margin, d.y, { size: 6.5, bold: true, colour: P.faint });
     d.textAt('WHAT TO DO', d.margin + COL.act, d.y, { size: 6.5, bold: true, colour: P.faint });
-    d.textRight('DUE', R, d.y, { size: 6.5, bold: true, colour: P.faint });
     d.y += 9;
     d.rect(d.margin, d.y, d.innerWidth, 1, P.line);
     d.y += 6;
@@ -875,7 +805,6 @@ export function briefPdf({ now, lastEdited, greeting, standingText,
     if (i % 2) d.rect(d.margin - 4, top - 4, d.innerWidth + 8, h + 6, P.card);
 
     d.textAt(c.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
-    if (c.dueHot) d.textRight(c.due, R, top, { size: 6.5, colour: P.crit, bold: true });
 
     const save = d.y;
     d.y = top;
@@ -958,14 +887,6 @@ export function briefPdf({ now, lastEdited, greeting, standingText,
                        { size: 8.5, colour: P.faint, after: 4 });
   }
 
-
-  /* ------------------------------------------------------ standing ---- */
-  /* What has not changed, once, at the end -- where the executive summary used
-     to put it at the front. */
-  if ((standingText || []).length) {
-    section('Standing', 'Unchanged risk, stated once.');
-    standingText.forEach(t => d.para(t, { size: 9.5, colour: P.mid, after: 6 }));
-  }
 
   return d.toBuffer((doc, page, total) => {
     doc.textAt('BM Ventures  -  Portfolio Brief  -  ' + longDate(now),
