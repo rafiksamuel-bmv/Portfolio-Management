@@ -48,20 +48,12 @@ free on purpose: Supabase and Resend are both plain REST, so nothing is
 installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
-- **It opens on who has to do what, and why.** The masthead used to be followed
-  by a counts paragraph and a row of stat tiles — 12 companies, 9 past maturity,
-  7 with counsel — and later by a one-line summary of the same shape. All true,
-  none of it a reason to do anything, and much the same most mornings. Counting
-  the work is not the same as saying what it is. Nothing now sits between the
-  greeting and the first instruction. `firstThings` gives one line per desk:
-  the most pressing action on it, the company, and `statusLine()` as the why.
-  The standing totals live at the foot.
-  - "Most pressing" is priority band then nearest due date, and deliberately
-    **not** how far past maturity a note is — that is the standing fact, and
-    ranking by it put the same 14-month-old company at the top of all three
-    desks.
-  - No two desks open on the same company where it can be avoided, for the same
-    reason: three lines about Zammit is the repetition this opening replaces.
+- **Nothing sits between the greeting and the first desk.** Successive versions
+  put a row of stat tiles there, then a counts paragraph, then a one-line
+  summary, then a lead item per person. Each was a smaller restatement of the
+  page beneath it, and each pushed the actual work down. The masthead now runs
+  straight into Mina's desk. Do not reintroduce an opener: if something matters
+  enough to lead with, it belongs in someone's `next_action`.
 - **The brief is what each person has to do. Everything else is the annex.**
   Body: the desk openers, then the desks, then the decisions awaiting sign-off.
   Annex, behind a divider: what moved, then standing risk. Nothing in the annex

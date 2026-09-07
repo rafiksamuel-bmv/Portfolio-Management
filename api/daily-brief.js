@@ -275,36 +275,6 @@ export function buildBrief({ companies, history, today }) {
   const movedReal = moved.filter(h => h.source !== DONE_SRC);
   const movedDone = moved.filter(h => h.source === DONE_SRC);
 
-  /* Most pressing first: priority band, then the nearest due date. Deliberately
-     NOT how far past maturity a note is -- that is the standing fact at the
-     foot, and using it here put the same 14-month-old company at the top of
-     all three desks. */
-  const PRI_RANK = { 'Immediate': 0, 'Near-Term': 1, 'Postponed': 2, 'No Action': 3 };
-  function pressing(a, b) {
-    const ra = PRI_RANK[a.priority], rb = PRI_RANK[b.priority];
-    const da = daysFrom(now, a.due), db = daysFrom(now, b.due);
-    return (ra === undefined ? 9 : ra) - (rb === undefined ? 9 : rb)
-        || (da === null ? 9999 : da) - (db === null ? 9999 : db)
-        || String(a.company).localeCompare(String(b.company));
-  }
-  /* And no two desks open on the same company where that can be avoided: three
-     lines about Zammit is the repetition this opening exists to replace. */
-  const taken = {};
-  const firstThings = DESKS.map(desk => {
-    const { mine } = deskRows(desk);
-    if (!mine.length) return null;
-    const ranked = mine.slice().sort((x, y) => pressing(x.c, y.c));
-    const pick = ranked.find(m => !taken[m.c.company]) || ranked[0];
-    taken[pick.c.company] = 1;
-    return {
-      who: desk.who,
-      company: pick.c.company,
-      action: pick.acts[0],
-      why: statusLine(pick.c, latestEntry(history, pick.c)),
-      rest: mine.length - 1,
-    };
-  }).filter(Boolean);
-
   /* No standing sentence above the desks. Counting the work is not the same as
      saying what it is, and the desk lines below say it. totalActions survives
      only for the subject line, where a number does earn its place. */
@@ -575,25 +545,6 @@ export function buildBrief({ companies, history, today }) {
     <div style="font-size:14px;line-height:1.65;color:${C.mid};">${esc(greeting(now))}</div>
   </td></tr>
 
-  <tr><td style="padding:16px 28px 4px;">
-    <table width="100%" cellpadding="0" cellspacing="0">
-      ${firstThings.map(f => `<tr>
-        <td valign="top" width="66" style="padding:9px 10px 9px 0;border-top:1px solid ${C.line};
-            font-size:13px;font-weight:700;color:${C.crit};white-space:nowrap;">${esc(f.who)}</td>
-        <td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};">
-          <div style="font-size:13.5px;font-weight:600;color:${C.ink};line-height:1.45;">${
-            esc(f.action)}</div>
-          <div style="font-size:11px;color:${C.faint};line-height:1.5;margin-top:3px;">
-            <b style="color:${C.mid};">${esc(f.company)}</b>${
-              f.why ? ' · ' + esc(f.why.slice(0, 120)) : ''}</div>
-        </td>
-        <td valign="top" align="right" width="74" style="padding:9px 0 9px 10px;
-            border-top:1px solid ${C.line};font-size:10.5px;color:${C.faint};
-            white-space:nowrap;">${f.rest ? '+' + f.rest + ' more' : ''}</td>
-      </tr>`).join('')}
-    </table>
-  </td></tr>
-
   ${section('Your morning', 'What each of us is holding, and what to do about it')}
   ${DESKS.map(deskBlock).join('')}${orphanBlock()}
 
@@ -682,7 +633,7 @@ export function buildBrief({ companies, history, today }) {
   });
   const orphanRows = byNum.filter(c => !onADesk[c.company]);
   const pdfData = {
-    now, lastEdited, greeting: greeting(now), firstThings, standingText,
+    now, lastEdited, greeting: greeting(now), standingText,
     desks: pdfDesks,
     orphans: orphanRows.length
       ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
@@ -707,9 +658,7 @@ export function buildBrief({ companies, history, today }) {
      preview to be useful, and nothing to read twice. */
   const text = [
     greeting(now),
-    ...firstThings.map(f =>
-      `${f.who}: ${f.action}\n    ${f.company}${f.why ? ' - ' + f.why : ''}`),
-    'The full brief is attached as a PDF.',
+    'Your portfolio brief is attached.',
   ].join('\n\n');
 
   return { html, text, subject, counts, pdfData,
@@ -843,7 +792,7 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
+export function briefPdf({ now, lastEdited, greeting, standingText,
   ticked, decided,
                            desks, moved, orphans }) {
   const P = {
@@ -899,15 +848,6 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
      the page already says, and pushed the first actual instruction below the
      fold. The brief opens on the one thing each desk has to move and why it is
      stuck; the standing totals it used to carry are at the foot. */
-  (firstThings || []).forEach(f => d.keepTogether(() => {
-    d.textAt(f.who.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.crit });
-    d.y += 11;
-    d.para(f.action, { size: 10.5, bold: true, colour: P.ink, after: 3 });
-    d.para(f.company + (f.why ? '  -  ' + f.why : '')
-             + (f.rest ? '   (+' + f.rest + ' more)' : ''),
-           { size: 8.5, colour: P.faint, after: 11 });
-  }));
-
   /* ----------------------------------------------------- the desks ---- */
   /* A grid, matching the email. Columns are fixed so the eye can run down
      them; each row is measured and kept whole. */
@@ -915,14 +855,16 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
   const gridHeader = () => {
     d.textAt('COMPANY', d.margin, d.y, { size: 6.5, bold: true, colour: P.faint });
     d.textAt('WHAT TO DO', d.margin + COL.act, d.y, { size: 6.5, bold: true, colour: P.faint });
-    d.textRight('STATUS / DUE', R, d.y, { size: 6.5, bold: true, colour: P.faint });
+    d.textRight('DUE', R, d.y, { size: 6.5, bold: true, colour: P.faint });
     d.y += 9;
     d.rect(d.margin, d.y, d.innerWidth, 1, P.line);
     d.y += 6;
   };
 
+  /* Same trim as the email: the lateness badge repeated a fact that is in the
+     Standing annex, and the status chip repeats the desk you are reading. The
+     due date shows only when it is actually near. */
   const gridRow = (c, i) => d.keepTogether(() => {
-    const [fg, bg] = tone(c.status);
     const top = d.y;
     const actW = COL.right - COL.act - 104;
     /* measure the tallest column first so the zebra covers the whole row */
@@ -933,11 +875,7 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
     if (i % 2) d.rect(d.margin - 4, top - 4, d.innerWidth + 8, h + 6, P.card);
 
     d.textAt(c.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
-    d.textAt(c.metaShort, d.margin, d.y + 12, { size: 6.5,
-             colour: c.overdue ? P.crit : P.faint });
-    d.chip(c.status || '-', top - 2, R, fg, bg, 6.5);
-    d.textRight(c.due || 'no date', R, top + 14,
-                { size: 6.5, colour: c.dueHot ? P.crit : P.faint, bold: c.dueHot });
+    if (c.dueHot) d.textRight(c.due, R, top, { size: 6.5, colour: P.crit, bold: true });
 
     const save = d.y;
     d.y = top;
@@ -959,8 +897,8 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
       + (act ? `${act} ${act === 1 ? 'item needs' : 'items need'} ${desk.who}'s action today.`
              : `Nothing needs ${desk.who}'s action today.`)
       + (desk.waiting.length
-        ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} with `
-          + `${desk.who === 'Mina' ? 'counsel' : 'the companies'}.`
+        ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} `
+          + `${String(desk.chaseLabel || 'waiting').replace(/^With /, 'with ')}.`
         : ''));
 
     if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
@@ -1005,13 +943,10 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
   started = false;
 
   /* ------------------------------------------------- what moved ---- */
-  /* Same order as the email: the day's movement first, then what is settled,
-     then the desks. */
   if ((moved || []).length) {
     section('What moved',
       `Every entry logged across the portfolio in the last three days, newest first, `
-      + `${moved.length} in all. This is the record; the desks below are what to do `
-      + 'about it.');
+      + `${moved.length} in all. This is the record behind the desks above.`);
     moved.forEach(m => d.keepTogether(() => {
       d.rule(P.line, { after: 8 });
       d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
