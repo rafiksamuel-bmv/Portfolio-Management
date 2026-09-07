@@ -48,14 +48,29 @@ free on purpose: Supabase and Resend are both plain REST, so nothing is
 installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
+- **Order is what moved, what is decided, then desks, then standing risk.** A
+  brief has to feel new each morning, so the sections that change daily come
+  first and the ones that do not are stated once at the foot.
 - The brief is organised by **person**, not by company: one block each for Mina,
-  Rafik and Reem. Each row carries the company, how late it is, that person's
-  action lines, and the status with its due date. Under the actions sits one
-  line of context: `issue_title` when the company has one, falling back to the
-  first line of the newest history entry (`issueLine()`). The fallback is the
-  guess `issue_title` was created to replace, so a company without a title
-  reads noticeably worse — that is the prompt to give it one. How a company
-  reaches a desk is set out below.
+  Rafik and Reem. A row carries the company, that person's action lines, and one
+  line of context underneath — `statusLine()`: `latest_status` (what happened),
+  falling back to `issue_title` (the topic), falling back to the first line of
+  the newest history entry. **A company appearing on several desks is the
+  point** — Mina approves Flend's notice while Reem and Rafik decide the
+  follow-on — but its *metadata* must not repeat with it. The lateness badge and
+  the status pill were reprinted on every copy and between them were most of the
+  brief's length: maturity now lives in the single Standing line, the status is
+  implied by the desk you are reading, and the due date shows only inside seven
+  days. How a company reaches a desk is set out below.
+- **Decisions get their own section.** `decision` / `decision_next` were
+  invisible, and the topline counted "ours to decide" from `status`, so it read
+  0 on the very day two decisions were taken. The topline now counts the
+  decisions themselves, and the pill beside each is derived from `dependency`
+  through `AWAIT`, the same way the deck derives its card pill.
+- **Tick-box entries are split out of What moved.** "Completed: chase the
+  founders" is a task leaving a list, not the position changing, and on a normal
+  day they outnumber the real entries and bury them. They collapse to one
+  "Also ticked off" line.
 - The header shows the newest `updated_at` across the tracker. There is no
   `asOf` setting any more: it was maintained by hand and went stale.
 - The activity window is **three days**, not one, and falls back to the five
@@ -66,9 +81,11 @@ output can be rendered and checked without sending anything.
   `Reem, Rafik:`, parsed by `parseAction()`, and only a prefix made entirely of
   known names counts so ordinary text like `Note:` survives. An untagged line
   falls to the company's `owner`. *Chasing* is the channel each person runs:
-  **Pending company is Rafik's, Pending legal is Mina's**, shown as "with the
-  companies" / "with counsel" and only when that company has no line tagged to
-  them already. One company can therefore sit on several desks with different
+  driven by `dependency` where a company has one and falling back to `status`
+  where it does not — Legal Counsel is Mina's, Founders / Company is Rafik's,
+  Misr Capital and the Board are Reem's — and listed only when that company has
+  no line tagged to them already. Each desk carries its own `chaseLabel`
+  rather than the label being inferred from the person's name. One company can therefore sit on several desks with different
   work, which is the point — Mina approves Flend's extension notice while Reem
   and Rafik decide the follow-on. Anything reaching no desk appears under
   **Unassigned**.
@@ -83,9 +100,10 @@ output can be rendered and checked without sending anything.
   out from `brief.pdfData` rather than converted from the HTML, so the two carry
   the same content without the PDF depending on the markup. If it throws, the
   email still goes and the response says `pdf: failed`.
-- Desks render as a **grid** — company, what to do, status and due in fixed
-  columns with zebra rows — not as prose blocks. The per-company timelines were
-  removed with it: between them they made the brief too long to read at 7am.
+- Desks render as a **grid** — company, what to do, and a due date only when it
+  is inside seven days — with zebra rows, not as prose blocks. The per-company
+  timelines were removed with it: between them they made the brief too long to
+  read at 7am.
 - The PDF **flows its sections** rather than giving each its own page, breaking only when one would start with
   too little room beneath it. Each opens with a sentence saying what it is for.
   Page 1 carries the masthead, the executive summary (exposure in principal,
