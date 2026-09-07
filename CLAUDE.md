@@ -50,8 +50,10 @@ output can be rendered and checked without sending anything.
 
 - **It opens on who has to do what, and why.** The masthead used to be followed
   by a counts paragraph and a row of stat tiles — 12 companies, 9 past maturity,
-  7 with counsel. All true, none of it a reason to do anything, and the same
-  numbers most mornings. In their place `firstThings` gives one line per desk:
+  7 with counsel — and later by a one-line summary of the same shape. All true,
+  none of it a reason to do anything, and much the same most mornings. Counting
+  the work is not the same as saying what it is. Nothing now sits between the
+  greeting and the first instruction. `firstThings` gives one line per desk:
   the most pressing action on it, the company, and `statusLine()` as the why.
   The standing totals live at the foot.
   - "Most pressing" is priority band then nearest due date, and deliberately

@@ -305,23 +305,10 @@ export function buildBrief({ companies, history, today }) {
     };
   }).filter(Boolean);
 
+  /* No standing sentence above the desks. Counting the work is not the same as
+     saying what it is, and the desk lines below say it. totalActions survives
+     only for the subject line, where a number does earn its place. */
   const totalActions = DESKS.reduce((n, d) => n + deskRows(d).mine.length, 0);
-  const waitingOn = decided
-    .map(c => String(AWAIT[c.dependency] || '').replace(/^Awaiting /, ''))
-    .filter(Boolean)
-    .filter((v, i, a) => a.indexOf(v) === i);
-  const andList = xs => xs.length < 2 ? (xs[0] || '')
-    : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
-  const topline =
-    `${totalActions} action${totalActions === 1 ? '' : 's'} across `
-  + `${firstThings.length} desk${firstThings.length === 1 ? '' : 's'}.`
-  + (decided.length
-      ? ` ${decided.length} decision${decided.length === 1 ? ' is' : 's are'} settled`
-        + `${waitingOn.length ? `, waiting on ${andList(waitingOn)}` : ''}.`
-      : '')
-  + (movedReal.length
-      ? ` ${movedReal.length} update${movedReal.length === 1 ? '' : 's'} logged in three days.`
-      : ' Nothing logged in three days.');
 
   const section = (title, sub) =>
     `<tr><td style="padding:26px 28px 8px;">
@@ -490,8 +477,9 @@ export function buildBrief({ companies, history, today }) {
     : '';
 
   /* ---- decisions taken ----
-     These were invisible: the topline counted "ours to decide" from status, so
-     it read 0 on the day two decisions were actually made. */
+     These used to be invisible: nothing in the brief said a decision had been
+     reached, and the summary that once sat at the top counted "ours to decide"
+     from status, so it read 0 on the day two decisions were actually made. */
   const decidedBlock = decided.map(c => `<tr>
       <td valign="top" width="118" style="padding:8px 10px 8px 0;border-bottom:1px solid ${C.line};
           font-size:12.5px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
@@ -585,8 +573,6 @@ export function buildBrief({ companies, history, today }) {
 
   <tr><td style="padding:24px 28px 6px;">
     <div style="font-size:14px;line-height:1.65;color:${C.mid};">${esc(greeting(now))}</div>
-    <div style="font-size:16px;line-height:1.6;color:${C.ink};font-weight:600;
-                margin-top:10px;">${esc(topline)}</div>
   </td></tr>
 
   <tr><td style="padding:16px 28px 4px;">
@@ -688,7 +674,7 @@ export function buildBrief({ companies, history, today }) {
   });
   const orphanRows = byNum.filter(c => !onADesk[c.company]);
   const pdfData = {
-    now, lastEdited, topline, greeting: greeting(now), firstThings, standingText,
+    now, lastEdited, greeting: greeting(now), firstThings, standingText,
     desks: pdfDesks,
     orphans: orphanRows.length
       ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
@@ -713,13 +699,12 @@ export function buildBrief({ companies, history, today }) {
      preview to be useful, and nothing to read twice. */
   const text = [
     greeting(now),
-    topline,
     ...firstThings.map(f =>
       `${f.who}: ${f.action}\n    ${f.company}${f.why ? ' - ' + f.why : ''}`),
     'The full brief is attached as a PDF.',
   ].join('\n\n');
 
-  return { html, text, subject, topline, counts, pdfData,
+  return { html, text, subject, counts, pdfData,
            overdue: overdue.length, moved: moved.length };
 }
 
@@ -850,7 +835,7 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, topline, greeting, firstThings, standingText,
+export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
   ticked, decided,
                            desks, moved, orphans }) {
   const P = {
@@ -906,7 +891,6 @@ export function briefPdf({ now, lastEdited, topline, greeting, firstThings, stan
      the page already says, and pushed the first actual instruction below the
      fold. The brief opens on the one thing each desk has to move and why it is
      stuck; the standing totals it used to carry are at the foot. */
-  d.para(topline, { size: 9.5, colour: P.mid, after: 16 });
   (firstThings || []).forEach(f => d.keepTogether(() => {
     d.textAt(f.who.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.crit });
     d.y += 11;
