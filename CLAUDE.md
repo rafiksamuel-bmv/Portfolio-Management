@@ -48,6 +48,18 @@ free on purpose: Supabase and Resend are both plain REST, so nothing is
 installed for it. `buildBrief()` is exported separately from the handler so the
 output can be rendered and checked without sending anything.
 
+- **It opens on who has to do what, and why.** The masthead used to be followed
+  by a counts paragraph and a row of stat tiles — 12 companies, 9 past maturity,
+  7 with counsel. All true, none of it a reason to do anything, and the same
+  numbers most mornings. In their place `firstThings` gives one line per desk:
+  the most pressing action on it, the company, and `statusLine()` as the why.
+  The standing totals live at the foot.
+  - "Most pressing" is priority band then nearest due date, and deliberately
+    **not** how far past maturity a note is — that is the standing fact, and
+    ranking by it put the same 14-month-old company at the top of all three
+    desks.
+  - No two desks open on the same company where it can be avoided, for the same
+    reason: three lines about Zammit is the repetition this opening replaces.
 - **Order is what moved, what is decided, then desks, then standing risk.** A
   brief has to feel new each morning, so the sections that change daily come
   first and the ones that do not are stated once at the foot.
@@ -73,6 +85,12 @@ output can be rendered and checked without sending anything.
   "Also ticked off" line.
 - The header shows the newest `updated_at` across the tracker. There is no
   `asOf` setting any more: it was maintained by hand and went stale.
+- **`parseDate()` accepts loose dates as well as ISO.** `maturity_date` and
+  `extended_to` are real DATE columns and arrive as ISO, but `due` is free text
+  the team writes as "30 Sep 2026" or "31 Dec 2026 (FRA)". While only ISO was
+  accepted, every `daysFrom(now, c.due)` returned null, so the DUE column could
+  never light up and "due inside a week" could not fire at all — silently, for
+  months. Keep both formats parsing.
 - The activity window is **three days**, not one, and falls back to the five
   most recent entries when nothing is in the window. A 24-hour window went
   blank on a quiet day, which is when the reader most needs the context.
