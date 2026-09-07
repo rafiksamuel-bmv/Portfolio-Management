@@ -128,10 +128,18 @@ output can be rendered and checked without sending anything.
   is inside seven days — with zebra rows, not as prose blocks. The per-company
   timelines were removed with it: between them they made the brief too long to
   read at 7am.
+- **There is no executive summary.** It restated in four labelled blocks what
+  the rest of the page already said, and pushed the first actual instruction
+  below the fold. The exposure and due-inside-a-week figures it carried are now
+  in the Standing section at the foot, so nothing was lost by dropping it.
+- **The PDF runs the same sections in the same order as the email** — the desk
+  openers, what moved, decided, the desks, then standing. They had drifted:
+  the PDF had no Decided section at all and kept "moved" at the end. Now that
+  the email carries only the PDF, a difference between them is a difference the
+  reader actually gets.
 - The PDF **flows its sections** rather than giving each its own page, breaking only when one would start with
   too little room beneath it. Each opens with a sentence saying what it is for.
-  Page 1 carries the masthead, the executive summary (exposure in principal,
-  what falls due inside a week, each desk's count) and usually the first desk.
+  Page 1 carries the masthead, the topline and the desk openers.
   Grid rows are placed with `keepTogether()` so none is split across a page.
 - `lib/pdf.js` supplies what PDF itself lacks: Helvetica and Helvetica-Bold
   character widths, a greedy wrapper, a cursor that starts a new page when it
