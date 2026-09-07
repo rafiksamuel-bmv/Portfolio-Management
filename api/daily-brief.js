@@ -712,7 +712,17 @@ export function buildBrief({ companies, history, today }) {
     })),
   };
 
-  return { html, subject, topline, counts, pdfData,
+  /* The email carries the PDF and this, not the HTML: enough for the phone
+     preview to be useful, and nothing to read twice. */
+  const text = [
+    greeting(now),
+    topline,
+    ...firstThings.map(f =>
+      `${f.who}: ${f.action}\n    ${f.company}${f.why ? ' - ' + f.why : ''}`),
+    'The full brief is attached as a PDF.',
+  ].join('\n\n');
+
+  return { html, text, subject, topline, counts, pdfData,
            overdue: overdue.length, moved: moved.length };
 }
 
@@ -811,8 +821,9 @@ export default async function handler(req, res) {
       from: BRIEF_FROM || 'BMV Portfolio <onboarding@resend.dev>',
       to: [BRIEF_TO || DEFAULT_TO],
       subject: brief.subject,
-      html: brief.html,
-      ...(attachments ? { attachments } : {}),
+      /* PDF only. The HTML is the fallback for the case where the PDF failed
+         to build -- a brief in the wrong format beats no brief at all. */
+      ...(attachments ? { text: brief.text, attachments } : { html: brief.html }),
     }),
   });
   if (!send.ok) return res.status(502).send(`Resend ${send.status}: ${await send.text()}`);
