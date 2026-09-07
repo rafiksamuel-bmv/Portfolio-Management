@@ -594,18 +594,26 @@ export function buildBrief({ companies, history, today }) {
     </table>
   </td></tr>
 
-  ${section(usingFallback ? 'Most recent activity' : 'What moved',
-      usingFallback
-        ? 'Nothing logged in the last three days, so here are the latest entries on file'
-        : `${movedReal.length} entr${movedReal.length === 1 ? 'y' : 'ies'} in the last three days`)}
-  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table>${tickedLine}</td></tr>
+  ${section('Your morning', 'What each of us is holding, and what to do about it')}
+  ${DESKS.map(deskBlock).join('')}${orphanBlock()}
 
   ${decided.length ? `${section('Decided, awaiting sign-off',
       'Settled on our side — what each one is waiting on')}
   <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${decidedBlock}</table></td></tr>` : ''}
 
-  ${section('Your morning', 'What each of us is holding, and what to do about it')}
-  ${DESKS.map(deskBlock).join('')}${orphanBlock()}
+  <tr><td style="padding:26px 28px 0;">
+    <div style="border-top:2px solid ${C.line};padding-top:14px;font-size:10px;
+         font-family:${MONO};font-weight:700;letter-spacing:.14em;color:${C.faint};">
+      ANNEX</div>
+    <div style="font-size:11px;color:${C.faint};margin-top:3px;">
+      The record behind the desks above. Nothing here needs doing today.</div>
+  </td></tr>
+
+  ${section(usingFallback ? 'Most recent activity' : 'What moved',
+      usingFallback
+        ? 'Nothing logged in the last three days, so here are the latest entries on file'
+        : `${movedReal.length} entr${movedReal.length === 1 ? 'y' : 'ies'} in the last three days`)}
+  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table>${tickedLine}</td></tr>
 
   ${section('Standing', 'Unchanged risk, stated once')}
   <tr><td style="padding:0 28px 6px;">${standing}</td></tr>
@@ -900,39 +908,6 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
            { size: 8.5, colour: P.faint, after: 11 });
   }));
 
-  /* ------------------------------------------------- what moved ---- */
-  /* Same order as the email: the day's movement first, then what is settled,
-     then the desks. */
-  if ((moved || []).length) {
-    section('What moved',
-      `Every entry logged across the portfolio in the last three days, newest first, `
-      + `${moved.length} in all. This is the record; the desks below are what to do `
-      + 'about it.');
-    moved.forEach(m => d.keepTogether(() => {
-      d.rule(P.line, { after: 8 });
-      d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
-      d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
-      d.y += 13;
-      d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
-    }));
-    if (ticked) d.para('Also ticked off: ' + ticked + '.',
-                       { size: 8.5, colour: P.faint, after: 4 });
-  }
-
-  /* --------------------------------------------------- decisions ---- */
-  if ((decided || []).length) {
-    section('Decided, awaiting sign-off',
-      'Settled on our side. What each one is now waiting on.');
-    decided.forEach(x => d.keepTogether(() => {
-      d.rule(P.line, { after: 8 });
-      d.textAt(x.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
-      d.textRight(x.pill, R, d.y, { size: 7.5, bold: true, colour: P.gold });
-      d.y += 13;
-      d.para(x.decision, { size: 9.5, colour: P.ink, after: 3 });
-      if (x.next) d.para(x.next, { size: 8.5, colour: P.faint, after: 4 });
-    }));
-  }
-
   /* ----------------------------------------------------- the desks ---- */
   /* A grid, matching the email. Columns are fixed so the eye can run down
      them; each row is measured and kept whole. */
@@ -1001,6 +976,53 @@ export function briefPdf({ now, lastEdited, greeting, firstThings, standingText,
       desk.waiting.forEach((c, i) => gridRow(c, i));
     }
   });
+
+  /* --------------------------------------------------- decisions ---- */
+  if ((decided || []).length) {
+    section('Decided, awaiting sign-off',
+      'Settled on our side. What each one is now waiting on.');
+    decided.forEach(x => d.keepTogether(() => {
+      d.rule(P.line, { after: 8 });
+      d.textAt(x.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
+      d.textRight(x.pill, R, d.y, { size: 7.5, bold: true, colour: P.gold });
+      d.y += 13;
+      d.para(x.decision, { size: 9.5, colour: P.ink, after: 3 });
+      if (x.next) d.para(x.next, { size: 8.5, colour: P.faint, after: 4 });
+    }));
+  }
+
+  /* ---------------------------------------------------------- annex ---- */
+  /* The record, not the work. It sits behind the desks because nothing in it
+     needs doing today -- the brief proper is what each person has to move. */
+  d.room(180);
+  d.y += 18;
+  d.rect(d.margin, d.y, d.innerWidth, 2, P.line);
+  d.y += 12;
+  d.textAt('ANNEX', d.margin, d.y, { size: 10, bold: true, colour: P.faint });
+  d.y += 14;
+  d.para('The record behind the desks above. Nothing here needs doing today.',
+         { size: 8.5, colour: P.faint, after: 4 });
+  started = false;
+
+  /* ------------------------------------------------- what moved ---- */
+  /* Same order as the email: the day's movement first, then what is settled,
+     then the desks. */
+  if ((moved || []).length) {
+    section('What moved',
+      `Every entry logged across the portfolio in the last three days, newest first, `
+      + `${moved.length} in all. This is the record; the desks below are what to do `
+      + 'about it.');
+    moved.forEach(m => d.keepTogether(() => {
+      d.rule(P.line, { after: 8 });
+      d.textAt(m.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
+      d.textRight(m.when, R, d.y, { size: 7.5, colour: P.faint });
+      d.y += 13;
+      d.para(m.entry, { size: 9, colour: P.mid, after: 4 });
+    }));
+    if (ticked) d.para('Also ticked off: ' + ticked + '.',
+                       { size: 8.5, colour: P.faint, after: 4 });
+  }
+
 
   /* ------------------------------------------------------ standing ---- */
   /* What has not changed, once, at the end -- where the executive summary used

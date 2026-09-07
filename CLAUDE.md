@@ -62,9 +62,15 @@ output can be rendered and checked without sending anything.
     desks.
   - No two desks open on the same company where it can be avoided, for the same
     reason: three lines about Zammit is the repetition this opening replaces.
-- **Order is what moved, what is decided, then desks, then standing risk.** A
-  brief has to feel new each morning, so the sections that change daily come
-  first and the ones that do not are stated once at the foot.
+- **The brief is what each person has to do. Everything else is the annex.**
+  Body: the desk openers, then the desks, then the decisions awaiting sign-off.
+  Annex, behind a divider: what moved, then standing risk. Nothing in the annex
+  needs doing today, which is the test for what belongs there.
+  - Decisions stay in the **body**, not the annex, because `decision_next` is
+    the only place some steps appear at all — "present to the Board at the next
+    meeting" is on no company's `next_action`. Annexing that section would bury
+    the sole mention of it. If a decision's next step is real work, it belongs
+    in `next_action` too, and then the card is safe to move.
 - The brief is organised by **person**, not by company: one block each for Mina,
   Rafik and Reem. A row carries the company, that person's action lines, and one
   line of context underneath — `statusLine()`: `latest_status` (what happened),
