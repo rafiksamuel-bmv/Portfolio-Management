@@ -56,8 +56,8 @@ output can be rendered and checked without sending anything.
   enough to lead with, it belongs in someone's `next_action`.
 - **The brief is what each person has to do. Everything else is the annex.**
   Body: the desk openers, then the desks, then the decisions awaiting sign-off.
-  Annex, behind a divider: what moved, then standing risk. Nothing in the annex
-  needs doing today, which is the test for what belongs there.
+  Annex, behind a divider: what moved. Nothing in the annex needs doing today,
+  which is the test for what belongs there.
   - Decisions stay in the **body**, not the annex, because `decision_next` is
     the only place some steps appear at all — "present to the Board at the next
     meeting" is on no company's `next_action`. Annexing that section would bury
@@ -69,11 +69,14 @@ output can be rendered and checked without sending anything.
   falling back to `issue_title` (the topic), falling back to the first line of
   the newest history entry. **A company appearing on several desks is the
   point** — Mina approves Flend's notice while Reem and Rafik decide the
-  follow-on — but its *metadata* must not repeat with it. The lateness badge and
-  the status pill were reprinted on every copy and between them were most of the
-  brief's length: maturity now lives in the single Standing line, the status is
-  implied by the desk you are reading, and the due date shows only inside seven
-  days. How a company reaches a desk is set out below.
+  follow-on — but its *metadata* must not repeat with it. **A row is two
+  columns: the company, and what that person has to do.** The lateness badge,
+  the status pill and the due date were reprinted on every copy and between
+  them were most of the brief's length. All three are gone, and so is the
+  Standing section that carried maturity and the week's due dates. The brief
+  states no dates at all now — that is deliberate, not an oversight, and it
+  means nothing in it flags an overdue review. How a company reaches a desk is
+  set out below.
 - **Decisions get their own section.** `decision` / `decision_next` were
   invisible, and the topline counted "ours to decide" from `status`, so it read
   0 on the very day two decisions were taken. The topline now counts the
@@ -124,10 +127,9 @@ output can be rendered and checked without sending anything.
   out from `brief.pdfData` rather than converted from the HTML, so the two carry
   the same content without the PDF depending on the markup. If it throws, the
   email still goes and the response says `pdf: failed`.
-- Desks render as a **grid** — company, what to do, and a due date only when it
-  is inside seven days — with zebra rows, not as prose blocks. The per-company
-  timelines were removed with it: between them they made the brief too long to
-  read at 7am.
+- Desks render as a **grid** — company, then what to do — with zebra rows, not
+  as prose blocks. The per-company timelines were removed with it: between them
+  they made the brief too long to read at 7am.
 - **There is no executive summary.** It restated in four labelled blocks what
   the rest of the page already said, and pushed the first actual instruction
   below the fold. The exposure and due-inside-a-week figures it carried are now
