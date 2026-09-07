@@ -112,6 +112,12 @@ output can be rendered and checked without sending anything.
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
   overrides to stop Outlook and Gmail inverting the ground back to white under
   light text. Do not reintroduce light values here.
+- **The email is the PDF.** The body is a few plain-text lines — the greeting,
+  the topline and each desk's lead item — so the phone preview is useful, and
+  the brief itself is the attachment. There is one artefact to read, forward
+  and file rather than the same content twice. The HTML is still built and
+  still served by `?preview=1`, and it is the **fallback if the PDF fails to
+  build**: a brief in the wrong format beats no brief.
 - **Every send carries a PDF**, built by `briefPdf()` on top of `lib/pdf.js`.
   Written by hand for the same reason as the Excel export: no service, no key,
   and the morning job cannot fail because someone else's API is down. It is laid
