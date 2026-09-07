@@ -36,14 +36,32 @@ const DEFAULT_TO = 'rafiksamuel@aucegypt.edu';
    So one company can sit on two desks with different work, which is the whole
    point: Mina approves Flend's extension notice while Reem and Rafik decide
    the follow-on. */
+/* chases is the old status-driven channel. deps is the same idea expressed in
+   the dependency field the deck introduced, which names who an item actually
+   waits on rather than inferring it from status. deps wins where a company has
+   one; chases still covers anything not yet tagged. */
 const DESKS = [
   { who: 'Mina',  role: 'counsel liaison', chases: 'Pending legal',
+    deps: ['Legal Counsel'], chaseLabel: 'With counsel',
     lead: 'Work tagged to Mina, and everything sitting with El-Shawarby.' },
   { who: 'Rafik', role: 'company outreach', chases: 'Pending company',
+    deps: ['Founders / Company'], chaseLabel: 'With the companies',
     lead: 'Work tagged to Rafik, and everything sitting with the companies.' },
   { who: 'Reem',  role: 'decisions & Mr. Mohamed', chases: null,
+    deps: ['Co-Investor (Misr Capital)', 'Internal — ISV / Board'],
+    chaseLabel: 'With Misr Capital or the Board',
     lead: 'Calls to make, and anything that needs Mr. Mohamed.' },
 ];
+
+/* Who a decision now sits with. Derived from dependency rather than stored,
+   the same way the status deck derives its card pill. */
+const AWAIT = {
+  'Founders / Company':         'Awaiting the company',
+  'Legal Counsel':              'Awaiting counsel',
+  'Internal — ISV / Board':     'Awaiting Board',
+  'No Dependency':              'Ready to proceed',
+  'Co-Investor (Misr Capital)': 'Awaiting Misr Capital',
+};
 
 /* A short human opening, so the brief starts like a note from a colleague
    rather than a report header. Varies by weekday so it does not read canned. */
@@ -118,6 +136,14 @@ function issueLine(c, last) {
   const t = String(c.issue_title || '').trim();
   if (t) return t;
   return last ? String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '') : '';
+}
+
+/* What goes under a desk row. latest_status is what actually happened and is
+   what a brief is for; issue_title only names the topic, so it is the fallback,
+   and the newest history entry the fallback of last resort. */
+function statusLine(c, last) {
+  const s = String(c.latest_status || '').trim();
+  return s || issueLine(c, last);
 }
 
 /* next_action is written as "• " bullet lines. */
@@ -227,9 +253,14 @@ export function buildBrief({ companies, history, today }) {
   const counts = {};
   ['Pending legal', 'Pending company', 'Pending our action'].forEach(k => {
     counts[k] = byNum.filter(c => c.status === k).length; });
+  /* "0 ours to decide" was counted from status, so it read zero on the very
+     day two decisions were taken. Count the decisions themselves. */
+  const decidedCount = byNum.filter(c => String(c.decision || '').trim()).length;
   const topline =
-    `${counts['Pending legal']} with counsel, ${counts['Pending company']} with the companies, `
-  + `${counts['Pending our action']} ours to decide. `
+    `${recent.filter(h => h.source !== DONE_SRC).length} update`
+  + `${recent.filter(h => h.source !== DONE_SRC).length === 1 ? '' : 's'} in three days. `
+  + `${counts['Pending legal']} with counsel, ${counts['Pending company']} with the companies`
+  + `${decidedCount ? `, ${decidedCount} decided and awaiting sign-off` : ''}. `
   + `${overdue.length} of ${byNum.length} notes are past maturity`
   + `${overdue.filter(c => !c.extended_to).length ? `, ${overdue.filter(c => !c.extended_to).length} with no signed extension` : ''}.`;
 
@@ -238,6 +269,7 @@ export function buildBrief({ companies, history, today }) {
     ['Past maturity', String(overdue.length), overdue.length ? C.crit : C.ok],
     ['With counsel', String(counts['Pending legal']), C.calm],
     ['With companies', String(counts['Pending company']), C.mid],
+    ['Decided', String(byNum.filter(c => String(c.decision || '').trim()).length), C.ok],
     ['Immediate', String(immediate.length), immediate.length ? C.crit : C.ok],
   ];
 
@@ -275,27 +307,30 @@ export function buildBrief({ companies, history, today }) {
       if (acts.length) mine.push({ c, acts: acts.map(a => a.text) });
     });
     const has = {}; mine.forEach(m => { has[m.c.company] = 1; });
-    const chasing = desk.chases
-      ? byNum.filter(c => c.status === desk.chases && !has[c.company])
-      : [];
+    const chasing = byNum.filter(c => {
+      if (has[c.company]) return false;
+      const dep = String(c.dependency || '').trim();
+      return dep ? (desk.deps || []).indexOf(dep) > -1
+                 : (desk.chases ? c.status === desk.chases : false);
+    });
     return { mine, chasing };
   }
 
+  /* A company can sit on several desks with different work, which is the
+     point. What must not repeat with it is the metadata: the lateness badge,
+     the status pill and the due date were being reprinted on every copy, and
+     between them they were most of the brief's length. Maturity now lives in
+     one standing line at the foot, the status pill is implied by the desk you
+     are reading, and the due date appears only when it is actually near. */
   function gridRow(c, actions, i) {
-    const [fg, bg] = statusTone(c.status);
-    const last = latestEntry(history, c);
     const due = daysFrom(now, c.due);
     const hot = due !== null && due <= 7;
-    const od = overdueDays(now, c);
     const zebra = i % 2 ? C.soft : 'transparent';
+    const ctx = statusLine(c, latestEntry(history, c));
     return `<tr>
-      <td valign="top" bgcolor="${zebra}" style="padding:9px 10px;border-bottom:1px solid ${C.line};
-          background:${zebra};">
+      <td valign="top" bgcolor="${zebra}" width="118" style="padding:9px 10px;
+          border-bottom:1px solid ${C.line};background:${zebra};">
         <div style="font-size:12.5px;font-weight:700;color:${C.ink};">${esc(c.company)}</div>
-        <div style="font-size:9.5px;font-family:${MONO};color:${od ? C.crit : C.faint};
-             margin-top:2px;white-space:nowrap;">${
-          od ? (Math.floor(od / 30.44) >= 1 ? Math.floor(od / 30.44) + 'mo late' : od + 'd late')
-             : effMaturity(c) ? dmy(effMaturity(c)) : '—'}</div>
       </td>
       <td valign="top" bgcolor="${zebra}" style="padding:9px 10px;border-bottom:1px solid ${C.line};
           background:${zebra};">
@@ -303,16 +338,14 @@ export function buildBrief({ companies, history, today }) {
           `<div style="font-size:12.5px;color:${C.ink};font-weight:600;line-height:1.45;
                 margin-bottom:3px;">${esc(a)}</div>`).join('')
           || `<div style="font-size:12px;color:${C.faint};">—</div>`}
-        ${issueLine(c, last) ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;
-          margin-top:3px;">${esc(issueLine(c, last).slice(0, 118))}</div>` : ''}
+        ${ctx ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;
+          margin-top:3px;">${esc(ctx.slice(0, 150))}</div>` : ''}
       </td>
-      <td valign="top" align="right" bgcolor="${zebra}"
+      <td valign="top" align="right" bgcolor="${zebra}" width="92"
           style="padding:9px 10px;border-bottom:1px solid ${C.line};background:${zebra};
                  white-space:nowrap;">
-        ${pill(c.status || '—', fg, bg)}
-        <div style="font-size:9.5px;font-family:${MONO};margin-top:4px;
-             color:${hot ? C.crit : C.faint};font-weight:${hot ? '700' : '400'};">${
-          c.due ? esc(c.due) : 'no date'}</div>
+        ${hot ? `<div style="font-size:9.5px;font-family:${MONO};color:${C.crit};
+             font-weight:700;">${esc(c.due)}</div>` : ''}
       </td>
     </tr>`;
   }
@@ -323,14 +356,16 @@ export function buildBrief({ companies, history, today }) {
     <td style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
         letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">WHAT TO DO</td>
     <td align="right" style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
-        letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">STATUS / DUE</td>
+        letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">DUE</td>
   </tr>`;
 
   function deskBlock(desk) {
     const { mine, chasing } = deskRows(desk);
     if (!mine.length && !chasing.length) return '';
+    /* rows is an array: interpolating it directly would join it with commas,
+       which rendered as a stray "," between every row of every desk. */
     const grid = rows => `<table width="100%" cellpadding="0" cellspacing="0"
-        style="margin-top:4px;">${gridHead}${rows}</table>`;
+        style="margin-top:4px;">${gridHead}${rows.join('')}</table>`;
     return `<tr><td style="padding:0 28px 18px;">
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="font-size:15px;font-weight:700;color:${C.ink};padding-bottom:2px;">
@@ -345,7 +380,7 @@ export function buildBrief({ companies, history, today }) {
       ${chasing.length ? `
         <div style="font-size:8.5px;font-family:${MONO};font-weight:700;letter-spacing:.08em;
              color:${C.faint};margin-top:12px;">${
-          desk.who === 'Mina' ? 'WITH COUNSEL' : 'WITH THE COMPANIES'} · ${chasing.length}</div>
+          (desk.chaseLabel || 'Waiting').toUpperCase()} · ${chasing.length}</div>
         ${grid(chasing.map((c, i) => gridRow(c, [], i)))}` : ''}
     </td></tr>`;
   }
@@ -378,8 +413,13 @@ export function buildBrief({ companies, history, today }) {
       </div></td></tr>`;
   }
 
-  /* ---- what moved ---- */
-  const movedBlock = moved.map((h, i) => {
+  /* ---- what moved ----
+     Split the tick-box entries out. "Completed: chase the founders" is a task
+     coming off a list, not the position changing, and on a normal day they
+     outnumber the real entries and bury them. */
+  const movedReal = moved.filter(h => h.source !== DONE_SRC);
+  const movedDone = moved.filter(h => h.source === DONE_SRC);
+  const movedBlock = movedReal.map((h, i) => {
     const zebra = i % 2 ? C.soft : 'transparent';
     return `<tr>
       <td valign="top" bgcolor="${zebra}" width="86" style="padding:6px 8px;background:${zebra};
@@ -392,26 +432,50 @@ export function buildBrief({ companies, history, today }) {
           border-bottom:1px solid ${C.line};font-size:11.5px;color:${C.mid};line-height:1.45;">${
         esc(String(h.entry).split('\n')[0].replace(/^[•\-]\s*/, '')).slice(0, 150)}</td>
     </tr>`;
-  }).join('');
+  }).join('')
+  || `<tr><td style="padding:8px 0;font-size:12px;color:${C.faint};">
+        Nothing logged since the last brief.</td></tr>`;
+  const tickedLine = movedDone.length
+    ? `<div style="font-size:11px;color:${C.faint};padding:8px 8px 0;">Also ticked off: ${
+        esc(movedDone.map(h => h.company).filter((v, i, a) => a.indexOf(v) === i).join(', '))
+      } · ${movedDone.length} action${movedDone.length === 1 ? '' : 's'}.</div>`
+    : '';
 
-  /* ---- clocks ---- */
+  /* ---- decisions taken ----
+     These were invisible: the topline counted "ours to decide" from status, so
+     it read 0 on the day two decisions were actually made. */
+  const decided = byNum.filter(c => String(c.decision || '').trim());
+  const decidedBlock = decided.map(c => `<tr>
+      <td valign="top" width="118" style="padding:8px 10px 8px 0;border-bottom:1px solid ${C.line};
+          font-size:12.5px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
+      <td valign="top" style="padding:8px 0;border-bottom:1px solid ${C.line};">
+        <div style="font-size:12.5px;color:${C.ink};line-height:1.45;">${esc(c.decision)}</div>
+        ${c.decision_next ? `<div style="font-size:11px;color:${C.faint};margin-top:3px;">${
+          esc(c.decision_next)}</div>` : ''}
+      </td>
+      <td valign="top" align="right" width="118" style="padding:8px 0 8px 10px;
+          border-bottom:1px solid ${C.line};white-space:nowrap;">${
+        pill(AWAIT[c.dependency] || 'agreed', C.ok, C.okBg)}</td>
+    </tr>`).join('');
+
+  /* ---- standing risks ----
+     Nine notes past maturity is real but it has not changed in 14 months. It
+     was a red badge on every desk row AND a section of its own, so the loudest
+     thing in the brief was also the least new. Once, at the foot. */
   const dueSoon = byNum
     .map(c => ({ c, d: daysFrom(now, c.due) }))
     .filter(x => x.d !== null && x.d <= 7)
     .sort((a, b) => a.d - b.d);
-  const clockRows = [
-    ...overdue.map(c => [c.company, overdueLabel(now, c), true]),
-    ...dueSoon.map(x => [x.c.company,
-      `review ${x.d < 0 ? Math.abs(x.d) + ' days overdue' : x.d === 0 ? 'due today' : 'due in ' + x.d + ' days'} (${x.c.due})`,
-      x.d <= 0]),
-  ];
-  const clocks = clockRows.length
-    ? clockRows.map(([co, txt, hot]) => `<tr>
-        <td style="padding:7px 0;border-top:1px solid ${C.line};font-size:12.5px;
-                   font-weight:700;color:${C.ink};width:130px;">${esc(co)}</td>
-        <td style="padding:7px 0;border-top:1px solid ${C.line};font-size:12.5px;
-                   color:${hot ? C.crit : C.mid};">${esc(txt)}</td></tr>`).join('')
-    : `<tr><td style="padding:8px 0;font-size:12.5px;color:${C.faint};">Nothing overdue or due this week.</td></tr>`;
+  const noExtNames = overdue.filter(c => !c.extended_to).map(c => c.company);
+  const standing = [
+    noExtNames.length
+      ? `<b style="color:${C.crit};">${noExtNames.length} note${noExtNames.length === 1 ? '' : 's'} past maturity</b> with no signed extension — ${esc(noExtNames.join(', '))}.`
+      : 'Every note is within term or covered by a signed extension.',
+    dueSoon.length
+      ? `<b>Due inside a week:</b> ${esc(dueSoon.map(x => `${x.c.company} (${x.c.due})`).join(', '))}.`
+      : '',
+  ].filter(Boolean).map(t =>
+    `<div style="font-size:12px;color:${C.mid};line-height:1.6;">${t}</div>`).join('');
 
   const html =
 `<!doctype html><html><head><meta charset="utf-8">
@@ -469,17 +533,21 @@ export function buildBrief({ companies, history, today }) {
     </tr></table>
   </td></tr>
 
+  ${section(usingFallback ? 'Most recent activity' : 'What moved',
+      usingFallback
+        ? 'Nothing logged in the last three days, so here are the latest entries on file'
+        : `${movedReal.length} entr${movedReal.length === 1 ? 'y' : 'ies'} in the last three days`)}
+  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table>${tickedLine}</td></tr>
+
+  ${decided.length ? `${section('Decided, awaiting sign-off',
+      'Settled on our side — what each one is waiting on')}
+  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${decidedBlock}</table></td></tr>` : ''}
+
   ${section('Your morning', 'What each of us is holding, and what to do about it')}
   ${DESKS.map(deskBlock).join('')}${orphanBlock()}
 
-  ${section('Clocks', 'Past maturity, and reviews due inside seven days')}
-  <tr><td style="padding:0 28px;"><table width="100%" cellpadding="0" cellspacing="0">${clocks}</table></td></tr>
-
-  ${section(usingFallback ? 'Most recent activity' : 'Moved in the last three days',
-      usingFallback
-        ? 'Nothing logged in the last three days, so here are the latest entries on file'
-        : `${moved.length} entr${moved.length === 1 ? 'y' : 'ies'} logged`)}
-  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${movedBlock}</table></td></tr>
+  ${section('Standing', 'Unchanged risk, stated once')}
+  <tr><td style="padding:0 28px 6px;">${standing}</td></tr>
 
   <tr><td style="padding:18px 28px 24px;border-top:1px solid ${C.line};">
     <div style="font-size:11.5px;color:${C.faint};line-height:1.6;">
@@ -494,9 +562,9 @@ export function buildBrief({ companies, history, today }) {
 </td></tr></table></body></html>`;
 
   const subject = `Portfolio Brief — ${dmy(todayStr)} · `
-    + `${counts['Pending legal']} legal · ${counts['Pending company']} company · `
-    + `${counts['Pending our action']} ours`
-    + (overdue.length ? ` · ${overdue.length} past maturity` : '');
+    + `${recent.filter(h => h.source !== DONE_SRC).length} moved · `
+    + `${counts['Pending legal']} legal · ${counts['Pending company']} company`
+    + (decidedCount ? ` · ${decidedCount} decided` : '');
 
   /* The same content the HTML shows, as plain data, so the PDF is laid out
      from the brief rather than converted from its markup. */
@@ -515,7 +583,7 @@ export function buildBrief({ companies, history, today }) {
         return mo >= 1 ? mo + 'mo late' : days + 'd late';   /* 0mo late reads as nothing */
       })(),
       overdue: !!od,
-      stands: issueLine(c, last),
+      stands: statusLine(c, last),
       standsWhen: last ? dmy(last.entry_date) + (last.source ? '  -  ' + last.source : '') : '',
       ask: (c.legal_req && c.status === 'Pending legal') ? c.legal_req : '',
       due: c.due ? 'due ' + c.due + (due !== null && due <= 7
@@ -531,8 +599,7 @@ export function buildBrief({ companies, history, today }) {
     const { mine, chasing } = deskRows(desk);
     return {
       who: desk.who, role: desk.role,
-      chaseLabel: desk.who === 'Mina' ? 'With counsel'
-                : desk.who === 'Rafik' ? 'With the companies' : 'Waiting',
+      chaseLabel: desk.chaseLabel || 'Waiting',
       mine:    mine.map(m => ({ ...forCompany(m.c), actions: m.acts })),
       waiting: chasing.map(forCompany),
     };
