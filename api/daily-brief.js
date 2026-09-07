@@ -75,9 +75,22 @@ function greeting(now) {
 /* ---------- dates ---------- */
 const MS_DAY = 86400000;
 function ymd(d) { return d.toISOString().slice(0, 10); }
+/* maturity_date and extended_to are real DATE columns and arrive as ISO, but
+   `due` is a free-text field the team writes as "30 Sep 2026" or
+   "31 Dec 2026 (FRA)". Parsing only ISO meant every daysFrom(now, c.due) came
+   back null, so the DUE column never lit up and "due inside a week" could not
+   fire at all. Accept both, the way parseLoose() does in the app. */
+const MON = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 function parseDate(s) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
-  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+  const t = String(s || '');
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (iso) return new Date(Date.UTC(+iso[1], +iso[2] - 1, +iso[3]));
+  const loose = /^\s*(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})/.exec(t);
+  if (loose) {
+    const i = MON.indexOf(loose[2].toLowerCase());
+    if (i >= 0) return new Date(Date.UTC(+loose[3], i, +loose[1]));
+  }
+  return null;
 }
 function daysFrom(today, s) {
   const d = parseDate(s);
@@ -249,29 +262,66 @@ export function buildBrief({ companies, history, today }) {
   const usingFallback = recent.length === 0;
   const moved = usingFallback ? history.slice().sort(sortByDate).slice(0, 5) : recent;
 
-  /* ---- top line: state the position, do not editorialise ---- */
+  /* ---- the opening ----
+     This used to be counts: 12 companies, 9 past maturity, 7 with counsel. All
+     true, none of it a reason to do anything, and the same numbers most
+     mornings. The brief opens instead with the one thing on each desk that
+     matters most today and why it is stuck, which is what a 7am reader is
+     actually looking for. The standing totals live at the foot. */
   const counts = {};
   ['Pending legal', 'Pending company', 'Pending our action'].forEach(k => {
     counts[k] = byNum.filter(c => c.status === k).length; });
-  /* "0 ours to decide" was counted from status, so it read zero on the very
-     day two decisions were taken. Count the decisions themselves. */
-  const decidedCount = byNum.filter(c => String(c.decision || '').trim()).length;
-  const topline =
-    `${recent.filter(h => h.source !== DONE_SRC).length} update`
-  + `${recent.filter(h => h.source !== DONE_SRC).length === 1 ? '' : 's'} in three days. `
-  + `${counts['Pending legal']} with counsel, ${counts['Pending company']} with the companies`
-  + `${decidedCount ? `, ${decidedCount} decided and awaiting sign-off` : ''}. `
-  + `${overdue.length} of ${byNum.length} notes are past maturity`
-  + `${overdue.filter(c => !c.extended_to).length ? `, ${overdue.filter(c => !c.extended_to).length} with no signed extension` : ''}.`;
+  const decided = byNum.filter(c => String(c.decision || '').trim());
+  const movedReal = moved.filter(h => h.source !== DONE_SRC);
+  const movedDone = moved.filter(h => h.source === DONE_SRC);
 
-  const stats = [
-    ['Companies', String(byNum.length), C.ink],
-    ['Past maturity', String(overdue.length), overdue.length ? C.crit : C.ok],
-    ['With counsel', String(counts['Pending legal']), C.calm],
-    ['With companies', String(counts['Pending company']), C.mid],
-    ['Decided', String(byNum.filter(c => String(c.decision || '').trim()).length), C.ok],
-    ['Immediate', String(immediate.length), immediate.length ? C.crit : C.ok],
-  ];
+  /* Most pressing first: priority band, then the nearest due date. Deliberately
+     NOT how far past maturity a note is -- that is the standing fact at the
+     foot, and using it here put the same 14-month-old company at the top of
+     all three desks. */
+  const PRI_RANK = { 'Immediate': 0, 'Near-Term': 1, 'Postponed': 2, 'No Action': 3 };
+  function pressing(a, b) {
+    const ra = PRI_RANK[a.priority], rb = PRI_RANK[b.priority];
+    const da = daysFrom(now, a.due), db = daysFrom(now, b.due);
+    return (ra === undefined ? 9 : ra) - (rb === undefined ? 9 : rb)
+        || (da === null ? 9999 : da) - (db === null ? 9999 : db)
+        || String(a.company).localeCompare(String(b.company));
+  }
+  /* And no two desks open on the same company where that can be avoided: three
+     lines about Zammit is the repetition this opening exists to replace. */
+  const taken = {};
+  const firstThings = DESKS.map(desk => {
+    const { mine } = deskRows(desk);
+    if (!mine.length) return null;
+    const ranked = mine.slice().sort((x, y) => pressing(x.c, y.c));
+    const pick = ranked.find(m => !taken[m.c.company]) || ranked[0];
+    taken[pick.c.company] = 1;
+    return {
+      who: desk.who,
+      company: pick.c.company,
+      action: pick.acts[0],
+      why: statusLine(pick.c, latestEntry(history, pick.c)),
+      rest: mine.length - 1,
+    };
+  }).filter(Boolean);
+
+  const totalActions = DESKS.reduce((n, d) => n + deskRows(d).mine.length, 0);
+  const waitingOn = decided
+    .map(c => String(AWAIT[c.dependency] || '').replace(/^Awaiting /, ''))
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i);
+  const andList = xs => xs.length < 2 ? (xs[0] || '')
+    : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+  const topline =
+    `${totalActions} action${totalActions === 1 ? '' : 's'} across `
+  + `${firstThings.length} desk${firstThings.length === 1 ? '' : 's'}.`
+  + (decided.length
+      ? ` ${decided.length} decision${decided.length === 1 ? ' is' : 's are'} settled`
+        + `${waitingOn.length ? `, waiting on ${andList(waitingOn)}` : ''}.`
+      : '')
+  + (movedReal.length
+      ? ` ${movedReal.length} update${movedReal.length === 1 ? '' : 's'} logged in three days.`
+      : ' Nothing logged in three days.');
 
   const section = (title, sub) =>
     `<tr><td style="padding:26px 28px 8px;">
@@ -417,8 +467,6 @@ export function buildBrief({ companies, history, today }) {
      Split the tick-box entries out. "Completed: chase the founders" is a task
      coming off a list, not the position changing, and on a normal day they
      outnumber the real entries and bury them. */
-  const movedReal = moved.filter(h => h.source !== DONE_SRC);
-  const movedDone = moved.filter(h => h.source === DONE_SRC);
   const movedBlock = movedReal.map((h, i) => {
     const zebra = i % 2 ? C.soft : 'transparent';
     return `<tr>
@@ -444,7 +492,6 @@ export function buildBrief({ companies, history, today }) {
   /* ---- decisions taken ----
      These were invisible: the topline counted "ours to decide" from status, so
      it read 0 on the day two decisions were actually made. */
-  const decided = byNum.filter(c => String(c.decision || '').trim());
   const decidedBlock = decided.map(c => `<tr>
       <td valign="top" width="118" style="padding:8px 10px 8px 0;border-bottom:1px solid ${C.line};
           font-size:12.5px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
@@ -523,14 +570,22 @@ export function buildBrief({ companies, history, today }) {
   </td></tr>
 
   <tr><td style="padding:16px 28px 4px;">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      ${stats.map(([label, val, col]) => `<td align="center" style="padding:10px 4px;background:${C.soft};
-          border:1px solid ${C.line};border-radius:8px;">
-        <div style="font-size:20px;font-weight:700;color:${col};font-family:${MONO};">${esc(val)}</div>
-        <div style="font-size:10px;color:${C.faint};text-transform:uppercase;letter-spacing:.06em;
-                    margin-top:2px;">${esc(label)}</div></td>
-        <td width="6"></td>`).join('').replace(/<td width="6"><\/td>$/, '')}
-    </tr></table>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      ${firstThings.map(f => `<tr>
+        <td valign="top" width="66" style="padding:9px 10px 9px 0;border-top:1px solid ${C.line};
+            font-size:13px;font-weight:700;color:${C.crit};white-space:nowrap;">${esc(f.who)}</td>
+        <td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};">
+          <div style="font-size:13.5px;font-weight:600;color:${C.ink};line-height:1.45;">${
+            esc(f.action)}</div>
+          <div style="font-size:11px;color:${C.faint};line-height:1.5;margin-top:3px;">
+            <b style="color:${C.mid};">${esc(f.company)}</b>${
+              f.why ? ' · ' + esc(f.why.slice(0, 120)) : ''}</div>
+        </td>
+        <td valign="top" align="right" width="74" style="padding:9px 0 9px 10px;
+            border-top:1px solid ${C.line};font-size:10.5px;color:${C.faint};
+            white-space:nowrap;">${f.rest ? '+' + f.rest + ' more' : ''}</td>
+      </tr>`).join('')}
+    </table>
   </td></tr>
 
   ${section(usingFallback ? 'Most recent activity' : 'What moved',
@@ -562,9 +617,9 @@ export function buildBrief({ companies, history, today }) {
 </td></tr></table></body></html>`;
 
   const subject = `Portfolio Brief — ${dmy(todayStr)} · `
-    + `${recent.filter(h => h.source !== DONE_SRC).length} moved · `
-    + `${counts['Pending legal']} legal · ${counts['Pending company']} company`
-    + (decidedCount ? ` · ${decidedCount} decided` : '');
+    + `${totalActions} action${totalActions === 1 ? '' : 's'}`
+    + (movedReal.length ? ` · ${movedReal.length} moved` : '')
+    + (decided.length ? ` · ${decided.length} decided` : '');
 
   /* The same content the HTML shows, as plain data, so the PDF is laid out
      from the brief rather than converted from its markup. */
@@ -644,7 +699,7 @@ export function buildBrief({ companies, history, today }) {
   ];
 
   const pdfData = {
-    now, lastEdited, topline, greeting: greeting(now), stats, summary,
+    now, lastEdited, topline, greeting: greeting(now), firstThings, summary,
     desks: pdfDesks,
     orphans: orphanRows.length
       ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
@@ -787,7 +842,7 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    no key and no dependency, and the daily job cannot fail because somebody
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
-export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
+export function briefPdf({ now, lastEdited, topline, greeting, firstThings, summary,
                            desks, moved, orphans }) {
   const P = {
     page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
@@ -850,17 +905,17 @@ export function briefPdf({ now, lastEdited, topline, greeting, stats, summary,
     d.para(text, { size: 10, colour: P.ink, after: 11 });
   }));
 
+  /* The counts that used to sit here said nothing about what to do. Open on
+     the one thing each desk has to move, and why it is stuck. */
   d.y += 4;
-  const colW = d.innerWidth / stats.length;
-  d.keepTogether(() => {
-    stats.forEach(([label, value, colour], i) => {
-      const x = d.margin + colW * i;
-      d.rect(x, d.y, colW - 6, 40, P.card);
-      d.textAt(value, x + 10, d.y + 8,  { size: 15, bold: true, colour });
-      d.textAt(label.toUpperCase(), x + 10, d.y + 27, { size: 6.5, bold: true, colour: P.faint });
-    });
-    d.y += 46;
-  });
+  (firstThings || []).forEach(f => d.keepTogether(() => {
+    d.textAt(f.who.toUpperCase(), d.margin, d.y, { size: 7, bold: true, colour: P.crit });
+    d.y += 11;
+    d.para(f.action, { size: 10.5, bold: true, colour: P.ink, after: 3 });
+    d.para(f.company + (f.why ? '  -  ' + f.why : '')
+             + (f.rest ? '   (+' + f.rest + ' more)' : ''),
+           { size: 8.5, colour: P.faint, after: 11 });
+  }));
 
   /* ----------------------------------------------------- the desks ---- */
   /* A grid, matching the email. Columns are fixed so the eye can run down
