@@ -617,6 +617,37 @@ export async function loadTracker(url, key) {
 }
 
 /* ---------- handler ---------- */
+/* The floor under the morning brief: company, then that company's raw
+   next_action lines straight off the row, with no formatting logic in between.
+   It exists because buildBrief throwing used to mean the cron returned 502 and
+   nobody was sent anything or told anything -- a data edit could silently cost
+   the whole morning. Keep this dependency-free and defensive: it is the thing
+   that runs when everything else has already gone wrong. */
+export function fallbackBrief(companies, err, now) {
+  let body = 'No open actions are recorded.';
+  try {
+    const blocks = (companies || []).map(c => {
+      const acts = String((c && c.next_action) || '').split('\n')
+        .map(l => l.replace(/^[•\-]\s*/, '').trim()).filter(Boolean);
+      const name = (c && c.company) || 'Unnamed';
+      return acts.length ? name + '\n' + acts.map(a => '  - ' + a).join('\n') : '';
+    }).filter(Boolean);
+    if (blocks.length) body = blocks.join('\n\n');
+  } catch (e) { body = 'The tracker could not be read either: ' + e.message; }
+  return {
+    reduced: true,
+    subject: `Portfolio Brief — ${dmy(ymd(now))} · reduced`,
+    text: [
+      'The brief could not be built this morning, so this is the raw list of',
+      'open actions from the tracker.',
+      '',
+      body,
+      '',
+      'What went wrong: ' + ((err && err.message) || String(err)),
+    ].join('\n'),
+  };
+}
+
 export default async function handler(req, res) {
   const {
     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
@@ -647,12 +678,24 @@ export default async function handler(req, res) {
   }
 
   const now0 = new Date();
+  let data;
+  try {
+    data = await loadTracker(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  } catch (err) {
+    return res.status(502).send(`Could not read the tracker: ${err.message}`);
+  }
+
   let brief;
   try {
-    const data = await loadTracker(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     brief = buildBrief({ ...data, today: now0 });
   } catch (err) {
-    return res.status(502).send(`Could not build the brief: ${err.message}`);
+    /* ?preview and ?pdf are a person looking at it, so show them the error.
+       A scheduled send must not go quiet: fall back to the raw actions so the
+       brief still arrives and the failure is visible in it. */
+    if (preview || url.searchParams.get('pdf') === '1') {
+      return res.status(502).send(`Could not build the brief: ${err.message}`);
+    }
+    brief = fallbackBrief(data && data.companies, err, now0);
   }
 
   if (url.searchParams.get('pdf') === '1') {
@@ -672,18 +715,22 @@ export default async function handler(req, res) {
   /* The PDF is built here, so it needs no key and cannot fail because an
      external service is down. If it throws anyway, the email still goes. */
   let attachments;
-  let pdfNote = 'attached';
-  try {
-    const bytes = briefPdf(brief.pdfData);
-    attachments = [{
-      filename: `portfolio-brief-${ymd(new Date())}.pdf`,
-      content: bytes.toString('base64'),
-      content_type: 'application/pdf',
-    }];
-    pdfNote = `attached (${bytes.length} bytes)`;
-  } catch (err) {
-    attachments = undefined;
-    pdfNote = `failed: ${err.message}`;
+  let pdfNote;
+  if (brief.reduced) {
+    pdfNote = 'skipped: reduced brief';          /* there is nothing to lay out */
+  } else {
+    try {
+      const bytes = briefPdf(brief.pdfData);
+      attachments = [{
+        filename: `portfolio-brief-${ymd(new Date())}.pdf`,
+        content: bytes.toString('base64'),
+        content_type: 'application/pdf',
+      }];
+      pdfNote = `attached (${bytes.length} bytes)`;
+    } catch (err) {
+      attachments = undefined;
+      pdfNote = `failed: ${err.message}`;
+    }
   }
 
   const send = await fetch('https://api.resend.com/emails', {
@@ -695,7 +742,8 @@ export default async function handler(req, res) {
       subject: brief.subject,
       /* PDF only. The HTML is the fallback for the case where the PDF failed
          to build -- a brief in the wrong format beats no brief at all. */
-      ...(attachments ? { text: brief.text, attachments } : { html: brief.html }),
+      ...(attachments ? { text: brief.text, attachments }
+                      : { text: brief.text, ...(brief.html ? { html: brief.html } : {}) }),
     }),
   });
   if (!send.ok) return res.status(502).send(`Resend ${send.status}: ${await send.text()}`);
