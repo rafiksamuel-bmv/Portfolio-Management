@@ -142,23 +142,6 @@ function doneRecent(history, c, n) {
     ).slice(0, n || 3);
 }
 
-/* The one line of context under a desk row. issue_title is the curated version
-   of what the newest entry's first line was only ever approximating, so prefer
-   it and fall back for any company that has not been given one yet. */
-function issueLine(c, last) {
-  const t = String(c.issue_title || '').trim();
-  if (t) return t;
-  return last ? String(last.entry).split('\n')[0].replace(/^[•\-]\s*/, '') : '';
-}
-
-/* What goes under a desk row. latest_status is what actually happened and is
-   what a brief is for; issue_title only names the topic, so it is the fallback,
-   and the newest history entry the fallback of last resort. */
-function statusLine(c, last) {
-  const s = String(c.latest_status || '').trim();
-  return s || issueLine(c, last);
-}
-
 /* next_action is written as "• " bullet lines. */
 function toLines(text) {
   return String(text || '').split('\n')
@@ -288,10 +271,9 @@ export function buildBrief({ companies, history, today }) {
      </td></tr>`;
 
   /* ---- desks ----
-     The centre of the brief. One block per person, and for each company on
-     their plate: where it stands, what they do about it, and what closing it
-     looks like. Everything a person needs is in their own block, so nobody
-     has to cross-reference another section to know their morning. */
+     The brief itself. One block per person, and for each company on their
+     plate the actions that are theirs. Everything else -- how it stands, what
+     closing it looks like, the dates -- lives in the tracker. */
   const label = (text, right) =>
     `<table width="100%" cellpadding="0" cellspacing="0" style="margin:11px 0 3px;"><tr>
        <td style="font-size:9.5px;font-family:${MONO};font-weight:700;letter-spacing:.09em;
@@ -300,9 +282,6 @@ export function buildBrief({ companies, history, today }) {
                   color:${C.faint};">${right}</td>` : ''}
      </tr></table>`;
 
-  /* A grid row, not a block. Company, where it stands in one line, the actions
-     that are this person's, and the date -- everything else lives in the
-     tracker and was making the brief too long to read at 7am. */
   /* One place that decides what lands on a desk, so the email and the PDF
      cannot drift apart. */
   function deskRows(desk) {
@@ -326,11 +305,11 @@ export function buildBrief({ companies, history, today }) {
   /* A company can sit on several desks with different work, which is the
      point. What must not repeat with it is the metadata: the lateness badge,
      the status pill and the due date were reprinted on every copy and between
-     them were most of the brief's length. All three are gone -- a row is the
-     company, what that person has to do, and one line saying why. */
+     them were most of the brief's length, along with the line of context that
+     sat under the actions. A row is two things: the company, and what that
+     person has to do about it. */
   function gridRow(c, actions, i) {
     const zebra = i % 2 ? C.soft : 'transparent';
-    const ctx = statusLine(c, latestEntry(history, c));
     return `<tr>
       <td valign="top" bgcolor="${zebra}" width="118" style="padding:9px 10px;
           border-bottom:1px solid ${C.line};background:${zebra};">
@@ -342,8 +321,6 @@ export function buildBrief({ companies, history, today }) {
           `<div style="font-size:12.5px;color:${C.ink};font-weight:600;line-height:1.45;
                 margin-bottom:3px;">${esc(a)}</div>`).join('')
           || `<div style="font-size:12px;color:${C.faint};">—</div>`}
-        ${ctx ? `<div style="font-size:10.5px;color:${C.faint};line-height:1.4;
-          margin-top:3px;">${esc(ctx.slice(0, 150))}</div>` : ''}
       </td>
     </tr>`;
   }
@@ -544,7 +521,6 @@ export function buildBrief({ companies, history, today }) {
      Standing section. */
   const forCompany = c => ({
     company: c.company,
-    stands: statusLine(c, latestEntry(history, c)),
     actions: toLines(c.next_action),
   });
 
@@ -554,7 +530,10 @@ export function buildBrief({ companies, history, today }) {
       who: desk.who, role: desk.role,
       chaseLabel: desk.chaseLabel || 'Waiting',
       mine:    mine.map(m => ({ ...forCompany(m.c), actions: m.acts })),
-      waiting: chasing.map(forCompany),
+      /* A chasing row is a company this person has no action on -- that is what
+         puts it in this list. The PDF used to print everyone else's action
+         lines here, prefix and all, where the email printed nothing. */
+      waiting: chasing.map(c => ({ ...forCompany(c), actions: [] })),
     };
   });
   /* Anything that reached no desk at all still has to be visible. */
@@ -843,15 +822,14 @@ export function briefPdf({ now, lastEdited, greeting,
 
   /* Same trim as the email: the lateness badge repeated a fact that is in the
      Standing annex, and the status chip repeats the desk you are reading. The
-     due date shows only when it is actually near. */
+     context line under the actions went with them. */
   const gridRow = (c, i) => d.keepTogether(() => {
     const top = d.y;
     const actW = COL.right - COL.act - 104;
     /* measure the tallest column first so the zebra covers the whole row */
     const bodyLines = (c.actions.length ? c.actions : ['-'])
       .reduce((n, a) => n + wrapCount(a, actW, 9, true), 0);
-    const standsLines = c.stands ? wrapCount(c.stands, actW, 7.5, false) : 0;
-    const h = Math.max(26, bodyLines * 12.5 + standsLines * 10 + 12);
+    const h = Math.max(26, bodyLines * 12.5 + 12);
     if (i % 2) d.rect(d.margin - 4, top - 4, d.innerWidth + 8, h + 6, P.card);
 
     d.textAt(c.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
@@ -862,8 +840,6 @@ export function briefPdf({ now, lastEdited, greeting,
       d.para(a, { size: 9, bold: true, colour: P.ink, indent: COL.act,
                   width: COL.act + actW, after: 1 });
     });
-    if (c.stands) d.para(c.stands, { size: 7.5, colour: P.faint, indent: COL.act,
-                                     width: COL.act + actW, after: 0 });
     d.y = Math.max(d.y, save) + 8;
   });
   /* How many lines will this wrap to? Cheap enough to ask twice. */
