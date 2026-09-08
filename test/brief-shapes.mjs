@@ -104,15 +104,21 @@ function behaviour() {
   check('owner prefix survives any bullet', routed.every(Boolean),
         bullets.map((b, i) => `${JSON.stringify(b || 'none')}:${routed[i] ? 'ok' : 'LOST'}`).join(' '));
 
-  /* Unassigned is a bucket of companies, not a person with a workload. */
-  const orphanCos = COMPANIES.map(c => ({ ...c, next_action: '', dependency: '', status: '' }));
-  const ob = buildBrief({ companies: orphanCos, history: [], today: TODAY });
-  const orph = ob.pdfData.orphans;
-  check('Unassigned carries its companies', !!orph && orph.mine.length === orphanCos.length,
-        orph ? `${orph.mine.length} in mine, ${orph.waiting.length} in waiting` : 'no orphans');
-  check('Unassigned is not described as a person',
-        !!orph && !!orph.blurb && !/Unassigned's action|sits Unassigned/.test(orph.blurb),
-        orph ? orph.blurb : '');
+  /* The brief is next actions and who owns them. A company nobody has an action
+     on does not belong in it -- not on a desk, not as a chase line, not in an
+     Unassigned bucket, whatever else it is tagged with. */
+  const quiet = { ...COMPANIES[0], company: 'Quiet', next_action: '' };
+  for (const [label, extra] of [['no tags at all',   { dependency: '', status: '' }],
+                                ['but has a status', { dependency: '', status: 'Pending legal' }],
+                                ['but has a dep',    { dependency: 'Legal Counsel', status: '' }]]) {
+    const cos = [{ ...quiet, ...extra }, COMPANIES[1]];
+    const b3 = buildBrief({ companies: cos, history: [], today: TODAY });
+    const inDesks = b3.pdfData.desks.some(d =>
+      d.mine.some(m => m.company === 'Quiet') || d.waiting.some(w => w.company === 'Quiet'));
+    check(`actionless company is dropped (${label})`,
+          !inDesks && !b3.html.includes('Quiet') && !('orphans' in b3.pdfData),
+          inDesks ? 'still on a desk' : (b3.html.includes('Quiet') ? 'still in the HTML' : ''));
+  }
 
   return out;
 }

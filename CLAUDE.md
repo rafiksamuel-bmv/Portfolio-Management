@@ -75,10 +75,9 @@ output can be rendered and checked without sending anything.
   nothing in it flags an overdue review. `latest_status` and `issue_title` are
   still what the status deck prints; the brief simply no longer repeats them.
 - A **chasing group is one line, not a table**: the label, then the company
-  names. Having no action for that person is what puts a company in the list,
+  names. Having no action *for that person* is what puts a company in the list,
   so a WHAT TO DO column there can only ever hold a dash — which is what it
-  held, one row per company. **Unassigned** is rendered the same way and for
-  the same reason. Only work goes in the grid.
+  held, one row per company. Only work goes in the grid.
 - **Decisions get their own section.** `decision` / `decision_next` were
   invisible, and the topline counted "ours to decide" from `status`, so it read
   0 on the very day two decisions were taken. The topline now counts the
@@ -123,11 +122,14 @@ output can be rendered and checked without sending anything.
   `owner` — Reem's work appeared on Rafik's desk, with the asterisk showing.
   `toLines()` strips the common bullets. One character was enough to send the
   work to the wrong person, so this is covered by a test.
-- **Unassigned is a bucket of companies, not a person.** It used to be shoehorned
-  into the desk shape with the companies in `waiting`, which made the template
-  say "Nothing needs Unassigned's action today", then "1 more sits Unassigned",
-  then "Nothing is waiting on Unassigned right now" immediately above the list
-  of what was waiting. It carries its rows in `mine` and its own `blurb`.
+- **A company with no `next_action` does not appear in the brief at all.** Not
+  on a desk, not as a chase line, and there is no Unassigned section any more:
+  the brief is next actions and who owns them, so a company nobody has an
+  action on has nothing to say. `deskRows()` drops it from chasing too, or a
+  `dependency` would quietly put it back. There was an Unassigned block for
+  this — it printed "Nothing needs Unassigned's action today", "1 more sits
+  Unassigned", and "Nothing is waiting on Unassigned right now" directly above
+  the list of what was waiting. Do not reintroduce it.
 - **`npm test` builds the brief against every shape the tracker can be put in**
   from the app — actions cleared, dependencies cleared, no history, a company
   that is only a name, every field null. Editing the tracker must never be able

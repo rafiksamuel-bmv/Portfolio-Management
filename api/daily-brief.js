@@ -299,6 +299,9 @@ export function buildBrief({ companies, history, today }) {
     const has = {}; mine.forEach(m => { has[m.c.company] = 1; });
     const chasing = byNum.filter(c => {
       if (has[c.company]) return false;
+      /* The brief is next actions and who owns them. A company nobody has an
+         action on has no place in it, however it happens to be tagged. */
+      if (!toLines(c.next_action).length) return false;
       const dep = String(c.dependency || '').trim();
       return dep ? (desk.deps || []).indexOf(dep) > -1
                  : (desk.chases ? c.status === desk.chases : false);
@@ -363,34 +366,6 @@ export function buildBrief({ companies, history, today }) {
                 font-size:8.5px;">${(desk.chaseLabel || 'Waiting').toUpperCase()}</span>
           &nbsp;${esc(chasing.map(c => c.company).join(', '))}</div>` : ''}
     </td></tr>`;
-  }
-
-  /* Nothing should fall off the brief because its owner is blank or is
-     somebody other than the three desks. */
-  function orphanBlock() {
-    const seen = {};
-    DESKS.forEach(d => {
-      const r = deskRows(d);
-      r.mine.forEach(m => { seen[m.c.company] = 1; });
-      r.chasing.forEach(c => { seen[c.company] = 1; });
-    });
-    const rows = byNum.filter(c => !seen[c.company]);
-    if (!rows.length) return '';
-    return `<tr><td style="padding:0 28px 16px;">
-      <div style="border:1px solid ${C.line};border-radius:10px;overflow:hidden;">
-        <div style="background:${C.soft};padding:14px 18px;border-bottom:1px solid ${C.line};">
-          <table width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td style="font-size:17px;font-weight:700;color:${C.ink};">Unassigned</td>
-            <td align="right">${pill(rows.length + (rows.length === 1 ? ' item' : ' items'),
-                                     C.warn, C.warnBg)}</td>
-          </tr></table>
-          <div style="font-size:12px;color:${C.faint};margin-top:4px;">
-            These reached no desk: no action is tagged to anyone and the status
-            does not put them with counsel or a company.</div>
-        </div>
-        <div style="padding:12px 18px 14px;font-size:12.5px;color:${C.mid};
-             line-height:1.5;">${esc(rows.map(c => c.company).join(', '))}</div>
-      </div></td></tr>`;
   }
 
   /* ---- what moved ----
@@ -480,7 +455,7 @@ export function buildBrief({ companies, history, today }) {
   </td></tr>
 
   ${section('Your morning', 'What each of us is holding, and what to do about it')}
-  ${DESKS.map(deskBlock).join('')}${orphanBlock()}
+  ${DESKS.map(deskBlock).join('')}
 
   ${decided.length ? `${section('Decided, awaiting sign-off',
       'Settled on our side — what each one is waiting on')}
@@ -540,29 +515,9 @@ export function buildBrief({ companies, history, today }) {
       waiting: chasing.map(c => ({ ...forCompany(c), actions: [] })),
     };
   });
-  /* Anything that reached no desk at all still has to be visible. */
-  const onADesk = {};
-  DESKS.forEach(d => {
-    const { mine, chasing } = deskRows(d);
-    mine.forEach(m => { onADesk[m.c.company] = 1; });
-    chasing.forEach(c => { onADesk[c.company] = 1; });
-  });
-  const orphanRows = byNum.filter(c => !onADesk[c.company]);
   const pdfData = {
     now, lastEdited, greeting: greeting(now),
     desks: pdfDesks,
-    /* Orphans are companies, not a person's workload. Putting them in `waiting`
-       made the desk template call them "Unassigned's action", say "1 more sits
-       Unassigned", and then claim "nothing is waiting on Unassigned" directly
-       above the list of what was waiting. They go in `mine` with their own
-       blurb instead. */
-    orphans: orphanRows.length
-      ? { who: 'Unassigned',
-          blurb: `${orphanRows.length} ${orphanRows.length === 1 ? 'company has' : 'companies have'} `
-               + 'no action tagged to anyone and nothing to be waiting on. '
-               + `${orphanRows.length === 1 ? 'It is' : 'They are'} on nobody's desk.`,
-          listOnly: true, mine: orphanRows.map(forCompany), waiting: [] }
-      : null,
     moved: movedReal.map(h => ({
       company: h.company || 'General',
       when: dmy(h.entry_date) + (h.source ? '  -  ' + h.source : ''),
@@ -766,7 +721,7 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    email, in the same dark identity. */
 export function briefPdf({ now, lastEdited, greeting,
   ticked, decided,
-                           desks, moved, orphans }) {
+                           desks, moved }) {
   const P = {
     page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
     ink: '#EDE5E6', mid: '#B0A2A4', faint: '#867779',
@@ -857,9 +812,9 @@ export function briefPdf({ now, lastEdited, greeting,
   /* How many lines will this wrap to? Cheap enough to ask twice. */
   const wrapCount = (t, w, size, bold) => wrapLines(t, bold, size, w).length;
 
-  desks.concat(orphans ? [orphans] : []).forEach(desk => {
+  desks.forEach(desk => {
     const act = desk.mine.length;
-    section(desk.who, desk.blurb || (
+    section(desk.who, (
       `${desk.role}. `
       + (act ? `${act} ${act === 1 ? 'item needs' : 'items need'} ${desk.who}'s action today.`
              : `Nothing needs ${desk.who}'s action today.`)
@@ -868,13 +823,7 @@ export function briefPdf({ now, lastEdited, greeting,
           + `${String(desk.chaseLabel || 'waiting').replace(/^With /, 'with ')}.`
         : '')));
 
-    if (act && desk.listOnly) {
-      /* Nothing to put under WHAT TO DO: having no action is what put these
-         here. Name them and move on. */
-      d.para(desk.mine.map(c => c.company).join(', '),
-             { size: 9, colour: P.mid, after: 4 });
-    }
-    else if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
+    if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
     else if (!desk.waiting.length) {
       d.para('Nothing is waiting on ' + desk.who + ' right now.',
              { size: 9, colour: P.faint, after: 6 });
