@@ -53,6 +53,18 @@ const DESKS = [
     lead: 'Calls to make, and anything that needs Mr. Mohamed.' },
 ];
 
+/* What a chase line is headed. Reem runs two channels, so labelling the group
+   by the desk put "WITH MISR CAPITAL OR THE BOARD" over Settle, which is with
+   ISV internally and not with Misr Capital at all. The heading comes from the
+   company's own dependency; desk.chaseLabel is only the fallback for a company
+   that reached the desk through `status` and has no dependency set. */
+const CHASE_LABEL = {
+  'Founders / Company':         'With the companies',
+  'Legal Counsel':              'With counsel',
+  'Internal — ISV / Board':     'With ISV or the Board',
+  'Co-Investor (Misr Capital)': 'With Misr Capital',
+};
+
 /* Who a decision now sits with. Derived from dependency rather than stored,
    the same way the status deck derives its card pill. */
 const AWAIT = {
@@ -306,7 +318,16 @@ export function buildBrief({ companies, history, today }) {
       return dep ? (desk.deps || []).indexOf(dep) > -1
                  : (desk.chases ? c.status === desk.chases : false);
     });
-    return { mine, chasing };
+    /* Grouped here rather than in either renderer, so the two cannot drift. */
+    const order = [], byLabel = {};
+    chasing.forEach(c => {
+      const label = CHASE_LABEL[String(c.dependency || '').trim()]
+                    || desk.chaseLabel || 'Waiting';
+      if (!byLabel[label]) { byLabel[label] = []; order.push(label); }
+      byLabel[label].push(c.company);
+    });
+    const chaseGroups = order.map(label => ({ label, companies: byLabel[label] }));
+    return { mine, chasing, chaseGroups };
   }
 
   /* A company can sit on several desks with different work, which is the
@@ -347,7 +368,7 @@ export function buildBrief({ companies, history, today }) {
       style="margin-top:4px;">${gridHead}${rows.join('')}</table>`;
 
   function deskBlock(desk) {
-    const { mine, chasing } = deskRows(desk);
+    const { mine, chasing, chaseGroups } = deskRows(desk);
     if (!mine.length && !chasing.length) return '';
     return `<tr><td style="padding:0 28px 18px;">
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
@@ -360,11 +381,11 @@ export function buildBrief({ companies, history, today }) {
           : pill(chasing.length ? 'chasing only' : 'clear', C.ok, C.okBg)}</td>
       </tr></table>
       ${mine.length ? grid(mine.map((m, i) => gridRow(m.c, m.acts, i))) : ''}
-      ${chasing.length ? `
+      ${chaseGroups.map(g => `
         <div style="font-size:11.5px;color:${C.faint};margin-top:12px;line-height:1.5;">
           <span style="font-family:${MONO};font-weight:700;letter-spacing:.08em;
-                font-size:8.5px;">${(desk.chaseLabel || 'Waiting').toUpperCase()}</span>
-          &nbsp;${esc(chasing.map(c => c.company).join(', '))}</div>` : ''}
+                font-size:8.5px;">${esc(g.label.toUpperCase())}</span>
+          &nbsp;${esc(g.companies.join(', '))}</div>`).join('')}
     </td></tr>`;
   }
 
@@ -504,7 +525,7 @@ export function buildBrief({ companies, history, today }) {
   });
 
   const pdfDesks = DESKS.map(desk => {
-    const { mine, chasing } = deskRows(desk);
+    const { mine, chasing, chaseGroups } = deskRows(desk);
     return {
       who: desk.who, role: desk.role,
       chaseLabel: desk.chaseLabel || 'Waiting',
@@ -513,6 +534,7 @@ export function buildBrief({ companies, history, today }) {
          puts it in this list. The PDF used to print everyone else's action
          lines here, prefix and all, where the email printed nothing. */
       waiting: chasing.map(c => ({ ...forCompany(c), actions: [] })),
+      chaseGroups,
     };
   });
   const pdfData = {
@@ -818,9 +840,11 @@ export function briefPdf({ now, lastEdited, greeting,
       `${desk.role}. `
       + (act ? `${act} ${act === 1 ? 'item needs' : 'items need'} ${desk.who}'s action today.`
              : `Nothing needs ${desk.who}'s action today.`)
+      /* The channels are named on the lines below, one per dependency. Naming
+         one of them here got it wrong for the other: Reem runs two. */
       + (desk.waiting.length
         ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} `
-          + `${String(desk.chaseLabel || 'waiting').replace(/^With /, 'with ')}.`
+          + 'with someone else.'
         : '')));
 
     if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
@@ -832,15 +856,13 @@ export function briefPdf({ now, lastEdited, greeting,
     /* A chasing row has nothing to put under WHAT TO DO -- having no action for
        this person is what puts the company in this list -- so it was a table of
        dashes. One line naming them says the same thing. */
-    if (desk.waiting.length) {
-      d.keepTogether(() => {
-        d.y += 10;
-        d.textAt((desk.chaseLabel || 'Waiting').toUpperCase(), d.margin, d.y,
-                 { size: 6.5, bold: true, colour: P.faint });
-        d.para(desk.waiting.map(c => c.company).join(', '),
-               { size: 9, colour: P.mid, indent: COL.act, width: d.innerWidth, after: 4 });
-      });
-    }
+    (desk.chaseGroups || []).forEach(g => d.keepTogether(() => {
+      d.y += 10;
+      d.textAt(g.label.toUpperCase(), d.margin, d.y,
+               { size: 6.5, bold: true, colour: P.faint });
+      d.para(g.companies.join(', '),
+             { size: 9, colour: P.mid, indent: COL.act, width: d.innerWidth, after: 4 });
+    }));
   });
 
   /* --------------------------------------------------- decisions ---- */

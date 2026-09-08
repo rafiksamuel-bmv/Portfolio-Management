@@ -78,6 +78,13 @@ output can be rendered and checked without sending anything.
   names. Having no action *for that person* is what puts a company in the list,
   so a WHAT TO DO column there can only ever hold a dash — which is what it
   held, one row per company. Only work goes in the grid.
+- **A chase line is headed by the company's own `dependency`** (`CHASE_LABEL`),
+  not by the desk's. Reem runs two channels, so one heading for her group put
+  "WITH MISR CAPITAL OR THE BOARD" over Settle, which is with ISV internally
+  and not with Misr Capital at all. `desk.chaseLabel` is only the fallback for
+  a company that reached the desk through `status` with no dependency set, and
+  the desk's own blurb says "with someone else" rather than naming one of two.
+  `deskRows()` does the grouping so the email and the PDF cannot disagree.
 - **Decisions get their own section.** `decision` / `decision_next` were
   invisible, and the topline counted "ours to decide" from `status`, so it read
   0 on the very day two decisions were taken. The topline now counts the
