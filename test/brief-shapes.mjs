@@ -120,6 +120,23 @@ function behaviour() {
           inDesks ? 'still on a desk' : (b3.html.includes('Quiet') ? 'still in the HTML' : ''));
   }
 
+  /* Reem runs two channels. A chase line must be headed by the company's own
+     dependency, not by a label merging both: Settle is with ISV internally and
+     was printed under "WITH MISR CAPITAL OR THE BOARD". */
+  const twoChannel = [
+    { ...COMPANIES[0], company: 'MisrOne', next_action: '• Rafik: something',
+      dependency: 'Co-Investor (Misr Capital)' },
+    { ...COMPANIES[0], company: 'BoardOne', next_action: '• Rafik: something',
+      dependency: 'Internal — ISV / Board' },
+  ];
+  const tb = buildBrief({ companies: twoChannel, history: [], today: TODAY });
+  const reemDesk = tb.pdfData.desks.find(d => d.who === 'Reem');
+  const groups = (reemDesk && reemDesk.chaseGroups) || [];
+  const find = co => (groups.find(g => g.companies.includes(co)) || {}).label;
+  check('chase line headed by its own channel',
+        find('MisrOne') === 'With Misr Capital' && find('BoardOne') === 'With ISV or the Board',
+        `MisrOne -> ${find('MisrOne')} | BoardOne -> ${find('BoardOne')}`);
+
   return out;
 }
 
