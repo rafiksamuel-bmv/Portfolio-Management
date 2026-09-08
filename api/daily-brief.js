@@ -358,10 +358,10 @@ export function buildBrief({ companies, history, today }) {
       </tr></table>
       ${mine.length ? grid(mine.map((m, i) => gridRow(m.c, m.acts, i))) : ''}
       ${chasing.length ? `
-        <div style="font-size:8.5px;font-family:${MONO};font-weight:700;letter-spacing:.08em;
-             color:${C.faint};margin-top:12px;">${
-          (desk.chaseLabel || 'Waiting').toUpperCase()} · ${chasing.length}</div>
-        ${grid(chasing.map((c, i) => gridRow(c, [], i)))}` : ''}
+        <div style="font-size:11.5px;color:${C.faint};margin-top:12px;line-height:1.5;">
+          <span style="font-family:${MONO};font-weight:700;letter-spacing:.08em;
+                font-size:8.5px;">${(desk.chaseLabel || 'Waiting').toUpperCase()}</span>
+          &nbsp;${esc(chasing.map(c => c.company).join(', '))}</div>` : ''}
     </td></tr>`;
   }
 
@@ -388,8 +388,8 @@ export function buildBrief({ companies, history, today }) {
             These reached no desk: no action is tagged to anyone and the status
             does not put them with counsel or a company.</div>
         </div>
-        <div style="padding:0 18px 6px;">${
-          grid(rows.map((c, i) => gridRow(c, [], i)))}</div>
+        <div style="padding:12px 18px 14px;font-size:12.5px;color:${C.mid};
+             line-height:1.5;">${esc(rows.map(c => c.company).join(', '))}</div>
       </div></td></tr>`;
   }
 
@@ -561,7 +561,7 @@ export function buildBrief({ companies, history, today }) {
           blurb: `${orphanRows.length} ${orphanRows.length === 1 ? 'company has' : 'companies have'} `
                + 'no action tagged to anyone and nothing to be waiting on. '
                + `${orphanRows.length === 1 ? 'It is' : 'They are'} on nobody's desk.`,
-          mine: orphanRows.map(forCompany), waiting: [] }
+          listOnly: true, mine: orphanRows.map(forCompany), waiting: [] }
       : null,
     moved: movedReal.map(h => ({
       company: h.company || 'General',
@@ -868,22 +868,29 @@ export function briefPdf({ now, lastEdited, greeting,
           + `${String(desk.chaseLabel || 'waiting').replace(/^With /, 'with ')}.`
         : '')));
 
-    if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
+    if (act && desk.listOnly) {
+      /* Nothing to put under WHAT TO DO: having no action is what put these
+         here. Name them and move on. */
+      d.para(desk.mine.map(c => c.company).join(', '),
+             { size: 9, colour: P.mid, after: 4 });
+    }
+    else if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
     else if (!desk.waiting.length) {
       d.para('Nothing is waiting on ' + desk.who + ' right now.',
              { size: 9, colour: P.faint, after: 6 });
     }
 
+    /* A chasing row has nothing to put under WHAT TO DO -- having no action for
+       this person is what puts the company in this list -- so it was a table of
+       dashes. One line naming them says the same thing. */
     if (desk.waiting.length) {
-      /* Keep the heading with at least its first row: it was being left alone
-         at the foot of a page with the row overleaf. */
-      d.room(72);
-      d.y += 10;
-      d.textAt((desk.chaseLabel || 'Waiting').toUpperCase() + ' - ' + desk.waiting.length,
-               d.margin, d.y, { size: 6.5, bold: true, colour: P.faint });
-      d.y += 11;
-      gridHeader();
-      desk.waiting.forEach((c, i) => gridRow(c, i));
+      d.keepTogether(() => {
+        d.y += 10;
+        d.textAt((desk.chaseLabel || 'Waiting').toUpperCase(), d.margin, d.y,
+                 { size: 6.5, bold: true, colour: P.faint });
+        d.para(desk.waiting.map(c => c.company).join(', '),
+               { size: 9, colour: P.mid, indent: COL.act, width: d.innerWidth, after: 4 });
+      });
     }
   });
 
