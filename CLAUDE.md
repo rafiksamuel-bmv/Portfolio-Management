@@ -113,8 +113,20 @@ output can be rendered and checked without sending anything.
   which is what happens the moment you clear a `next_action`. That path went
   years without executing and called a `deskItem()` that had never existed, so
   the whole brief threw. It now renders through the same `grid()`/`gridRow()`
-  as a desk. Exercise it when changing desk routing: clear one company's
-  `next_action` and build.
+  as a desk.
+- **`npm test` builds the brief against every shape the tracker can be put in**
+  from the app — actions cleared, dependencies cleared, no history, a company
+  that is only a name, every field null. Editing the tracker must never be able
+  to stop the morning brief, and that is the only thing standing behind it.
+  Run it after touching desk routing, the grid, or anything that reads a
+  company field. It is not decoration: reintroduce the `deskItem` bug and five
+  cases fail.
+- **A build failure no longer means silence.** `buildBrief` throwing used to
+  return 502 from the cron, so nobody was sent anything and nobody was told.
+  `fallbackBrief()` now sends the raw `next_action` lines per company plus the
+  error, with no PDF. `?preview=1` and `?pdf=1` still return the error instead,
+  because a person is looking at those and should see it. Keep the fallback
+  defensive — it is what runs when everything else has already gone wrong.
 - The brief is **always dark**, not "dark if the reader is". Email cannot carry
   a media query reliably, so the palette is written as literals (the app's dark
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
