@@ -142,10 +142,14 @@ function doneRecent(history, c, n) {
     ).slice(0, n || 3);
 }
 
-/* next_action is written as "• " bullet lines. */
+/* next_action is written as "• " bullet lines, but people type what their
+   keyboard gives them. Strip * and the other common bullets too: a line typed
+   "*Reem: ..." kept its asterisk, so parseAction saw the owner as "*Reem",
+   matched nobody, and quietly delivered Reem's action to the company's owner
+   instead. One character sent the work to the wrong desk. */
 function toLines(text) {
   return String(text || '').split('\n')
-    .map(l => l.replace(/^[•\-]\s*/, '').trim()).filter(Boolean);
+    .map(l => l.replace(/^[•\-*·▪‣o]\s*/i, '').trim()).filter(Boolean);
 }
 
 const PEOPLE = ['Mina', 'Rafik', 'Reem'];
@@ -547,9 +551,17 @@ export function buildBrief({ companies, history, today }) {
   const pdfData = {
     now, lastEdited, greeting: greeting(now),
     desks: pdfDesks,
+    /* Orphans are companies, not a person's workload. Putting them in `waiting`
+       made the desk template call them "Unassigned's action", say "1 more sits
+       Unassigned", and then claim "nothing is waiting on Unassigned" directly
+       above the list of what was waiting. They go in `mine` with their own
+       blurb instead. */
     orphans: orphanRows.length
-      ? { who: 'Unassigned', role: 'on nobody\'s desk', chaseLabel: 'Unassigned',
-          mine: [], waiting: orphanRows.map(forCompany) }
+      ? { who: 'Unassigned',
+          blurb: `${orphanRows.length} ${orphanRows.length === 1 ? 'company has' : 'companies have'} `
+               + 'no action tagged to anyone and nothing to be waiting on. '
+               + `${orphanRows.length === 1 ? 'It is' : 'They are'} on nobody's desk.`,
+          mine: orphanRows.map(forCompany), waiting: [] }
       : null,
     moved: movedReal.map(h => ({
       company: h.company || 'General',
@@ -847,20 +859,25 @@ export function briefPdf({ now, lastEdited, greeting,
 
   desks.concat(orphans ? [orphans] : []).forEach(desk => {
     const act = desk.mine.length;
-    section(desk.who,
+    section(desk.who, desk.blurb || (
       `${desk.role}. `
       + (act ? `${act} ${act === 1 ? 'item needs' : 'items need'} ${desk.who}'s action today.`
              : `Nothing needs ${desk.who}'s action today.`)
       + (desk.waiting.length
         ? ` ${desk.waiting.length} more ${desk.waiting.length === 1 ? 'sits' : 'sit'} `
           + `${String(desk.chaseLabel || 'waiting').replace(/^With /, 'with ')}.`
-        : ''));
+        : '')));
 
     if (act) { gridHeader(); desk.mine.forEach((c, i) => gridRow(c, i)); }
-    else d.para('Nothing is waiting on ' + desk.who + ' right now.',
-                { size: 9, colour: P.faint, after: 6 });
+    else if (!desk.waiting.length) {
+      d.para('Nothing is waiting on ' + desk.who + ' right now.',
+             { size: 9, colour: P.faint, after: 6 });
+    }
 
     if (desk.waiting.length) {
+      /* Keep the heading with at least its first row: it was being left alone
+         at the foot of a page with the row overleaf. */
+      d.room(72);
       d.y += 10;
       d.textAt((desk.chaseLabel || 'Waiting').toUpperCase() + ' - ' + desk.waiting.length,
                d.margin, d.y, { size: 6.5, bold: true, colour: P.faint });

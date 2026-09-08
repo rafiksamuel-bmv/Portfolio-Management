@@ -86,6 +86,37 @@ const CASES = {
   'decided but no dependency':   [COMPANIES.map(c => ({ ...c, dependency: '' })), HISTORY],
 };
 
+/* Shapes are not enough on their own: these three all built fine and were
+   still wrong in the brief that went out on 8 September. */
+function behaviour() {
+  const out = [];
+  const check = (name, ok, detail) => { out.push([name, ok, detail]); };
+
+  /* An owner prefix must survive whatever bullet character was typed. */
+  const bullets = ['•', '*', '-', '·', ''];
+  const routed = bullets.map(b => {
+    const cos = [{ ...COMPANIES[1], company: 'Bullet', owner: 'Rafik',
+                   next_action: `${b}Reem: do the thing` }];
+    const b2 = buildBrief({ companies: cos, history: [], today: TODAY });
+    const reem = b2.pdfData.desks.find(d => d.who === 'Reem');
+    return reem && reem.mine.length === 1;
+  });
+  check('owner prefix survives any bullet', routed.every(Boolean),
+        bullets.map((b, i) => `${JSON.stringify(b || 'none')}:${routed[i] ? 'ok' : 'LOST'}`).join(' '));
+
+  /* Unassigned is a bucket of companies, not a person with a workload. */
+  const orphanCos = COMPANIES.map(c => ({ ...c, next_action: '', dependency: '', status: '' }));
+  const ob = buildBrief({ companies: orphanCos, history: [], today: TODAY });
+  const orph = ob.pdfData.orphans;
+  check('Unassigned carries its companies', !!orph && orph.mine.length === orphanCos.length,
+        orph ? `${orph.mine.length} in mine, ${orph.waiting.length} in waiting` : 'no orphans');
+  check('Unassigned is not described as a person',
+        !!orph && !!orph.blurb && !/Unassigned's action|sits Unassigned/.test(orph.blurb),
+        orph ? orph.blurb : '');
+
+  return out;
+}
+
 let failed = 0;
 for (const [name, [companies, history]] of Object.entries(CASES)) {
   let note = 'ok';
@@ -115,5 +146,11 @@ for (const [label, arg] of [['a real tracker', COMPANIES], ['null', null], ['[]'
   }
 }
 
-console.log(failed ? `\n${failed} FAILED` : '\nall shapes build');
+console.log('\n  behaviour, not just "it built"');
+for (const [name, ok, detail] of behaviour()) {
+  console.log(`  ${('  ' + name).padEnd(40)} ${ok ? 'ok' : 'FAILED'}  ${detail}`);
+  if (!ok) failed++;
+}
+
+console.log(failed ? `\n${failed} FAILED` : '\nall shapes build, all behaviour holds');
 process.exit(failed ? 1 : 0);
