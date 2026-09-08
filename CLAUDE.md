@@ -114,13 +114,26 @@ output can be rendered and checked without sending anything.
   years without executing and called a `deskItem()` that had never existed, so
   the whole brief threw. It now renders through the same `grid()`/`gridRow()`
   as a desk.
+- **An action line's owner prefix must survive the bullet character.**
+  `next_action` is meant to be `• ` lines, but people type `*` or `-` or
+  nothing. A line typed `*Reem: ...` kept its asterisk, so `parseAction` read
+  the owner as `*Reem`, matched nobody, and fell through to the company's
+  `owner` — Reem's work appeared on Rafik's desk, with the asterisk showing.
+  `toLines()` strips the common bullets. One character was enough to send the
+  work to the wrong person, so this is covered by a test.
+- **Unassigned is a bucket of companies, not a person.** It used to be shoehorned
+  into the desk shape with the companies in `waiting`, which made the template
+  say "Nothing needs Unassigned's action today", then "1 more sits Unassigned",
+  then "Nothing is waiting on Unassigned right now" immediately above the list
+  of what was waiting. It carries its rows in `mine` and its own `blurb`.
 - **`npm test` builds the brief against every shape the tracker can be put in**
   from the app — actions cleared, dependencies cleared, no history, a company
   that is only a name, every field null. Editing the tracker must never be able
   to stop the morning brief, and that is the only thing standing behind it.
   Run it after touching desk routing, the grid, or anything that reads a
   company field. It is not decoration: reintroduce the `deskItem` bug and five
-  cases fail.
+  cases fail. It also checks **behaviour, not just that it built** — every
+  shape below built fine on 8 September and the brief was still wrong.
 - **A build failure no longer means silence.** `buildBrief` throwing used to
   return 502 from the cron, so nobody was sent anything and nobody was told.
   `fallbackBrief()` now sends the raw `next_action` lines per company plus the
