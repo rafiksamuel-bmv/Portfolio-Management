@@ -109,7 +109,12 @@ output can be rendered and checked without sending anything.
   rather than the label being inferred from the person's name. One company can therefore sit on several desks with different
   work, which is the point — Mina approves Flend's extension notice while Reem
   and Rafik decide the follow-on. Anything reaching no desk appears under
-  **Unassigned**.
+  **Unassigned** — a company with no tagged action and no dependency channel,
+  which is what happens the moment you clear a `next_action`. That path went
+  years without executing and called a `deskItem()` that had never existed, so
+  the whole brief threw. It now renders through the same `grid()`/`gridRow()`
+  as a desk. Exercise it when changing desk routing: clear one company's
+  `next_action` and build.
 - The brief is **always dark**, not "dark if the reader is". Email cannot carry
   a media query reliably, so the palette is written as literals (the app's dark
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`

@@ -356,13 +356,15 @@ export function buildBrief({ companies, history, today }) {
     <td align="right" style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
   </tr>`;
 
+  /* rows is an array: interpolating it directly would join it with commas,
+     which rendered as a stray "," between every row of every desk. Shared with
+     the Unassigned block below, which has to render the same way. */
+  const grid = rows => `<table width="100%" cellpadding="0" cellspacing="0"
+      style="margin-top:4px;">${gridHead}${rows.join('')}</table>`;
+
   function deskBlock(desk) {
     const { mine, chasing } = deskRows(desk);
     if (!mine.length && !chasing.length) return '';
-    /* rows is an array: interpolating it directly would join it with commas,
-       which rendered as a stray "," between every row of every desk. */
-    const grid = rows => `<table width="100%" cellpadding="0" cellspacing="0"
-        style="margin-top:4px;">${gridHead}${rows.join('')}</table>`;
     return `<tr><td style="padding:0 28px 18px;">
       <table width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="font-size:15px;font-weight:700;color:${C.ink};padding-bottom:2px;">
@@ -405,8 +407,8 @@ export function buildBrief({ companies, history, today }) {
             These reached no desk: no action is tagged to anyone and the status
             does not put them with counsel or a company.</div>
         </div>
-        <table width="100%" cellpadding="0" cellspacing="0"
-               style="padding:0 18px 6px;">${rows.map(deskItem).join('')}</table>
+        <div style="padding:0 18px 6px;">${
+          grid(rows.map((c, i) => gridRow(c, [], i)))}</div>
       </div></td></tr>`;
   }
 
