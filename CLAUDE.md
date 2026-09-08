@@ -74,9 +74,11 @@ output can be rendered and checked without sending anything.
   brief **states no dates at all** — deliberate, not an oversight, and it means
   nothing in it flags an overdue review. `latest_status` and `issue_title` are
   still what the status deck prints; the brief simply no longer repeats them.
-- A **chasing row** is a company that person has no action on — that is what
-  puts it in the list — so it shows no actions. The PDF used to print everyone
-  else's lines there, owner prefix and all, where the email printed nothing.
+- A **chasing group is one line, not a table**: the label, then the company
+  names. Having no action for that person is what puts a company in the list,
+  so a WHAT TO DO column there can only ever hold a dash — which is what it
+  held, one row per company. **Unassigned** is rendered the same way and for
+  the same reason. Only work goes in the grid.
 - **Decisions get their own section.** `decision` / `decision_next` were
   invisible, and the topline counted "ours to decide" from `status`, so it read
   0 on the very day two decisions were taken. The topline now counts the
