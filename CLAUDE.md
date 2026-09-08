@@ -64,19 +64,19 @@ output can be rendered and checked without sending anything.
     the sole mention of it. If a decision's next step is real work, it belongs
     in `next_action` too, and then the card is safe to move.
 - The brief is organised by **person**, not by company: one block each for Mina,
-  Rafik and Reem. A row carries the company, that person's action lines, and one
-  line of context underneath — `statusLine()`: `latest_status` (what happened),
-  falling back to `issue_title` (the topic), falling back to the first line of
-  the newest history entry. **A company appearing on several desks is the
-  point** — Mina approves Flend's notice while Reem and Rafik decide the
-  follow-on — but its *metadata* must not repeat with it. **A row is two
-  columns: the company, and what that person has to do.** The lateness badge,
-  the status pill and the due date were reprinted on every copy and between
-  them were most of the brief's length. All three are gone, and so is the
-  Standing section that carried maturity and the week's due dates. The brief
-  states no dates at all now — that is deliberate, not an oversight, and it
-  means nothing in it flags an overdue review. How a company reaches a desk is
-  set out below.
+  Rafik and Reem. **A row is two things: the company, and what that person has
+  to do.** Nothing else. **A company appearing on several desks is the point** —
+  Mina approves Flend's notice while Reem and Rafik decide the follow-on — but
+  nothing may repeat with it. Removed in turn, each for the same reason: the
+  lateness badge, the status pill, the due date, and the line of context under
+  the actions (`latest_status`, falling back to `issue_title`). Between them
+  they were most of the brief's length. The Standing section went too, so the
+  brief **states no dates at all** — deliberate, not an oversight, and it means
+  nothing in it flags an overdue review. `latest_status` and `issue_title` are
+  still what the status deck prints; the brief simply no longer repeats them.
+- A **chasing row** is a company that person has no action on — that is what
+  puts it in the list — so it shows no actions. The PDF used to print everyone
+  else's lines there, owner prefix and all, where the email printed nothing.
 - **Decisions get their own section.** `decision` / `decision_next` were
   invisible, and the topline counted "ours to decide" from `status`, so it read
   0 on the very day two decisions were taken. The topline now counts the
