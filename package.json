@@ -10,6 +10,6 @@
     "typescript": "^7.0.2"
   },
   "scripts": {
-    "test": "node test/brief-shapes.mjs"
+    "test": "node test/brief-shapes.mjs && node test/deck.cjs"
   }
 }

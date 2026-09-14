@@ -104,6 +104,18 @@ function behaviour() {
   check('owner prefix survives any bullet', routed.every(Boolean),
         bullets.map((b, i) => `${JSON.stringify(b || 'none')}:${routed[i] ? 'ok' : 'LOST'}`).join(' '));
 
+  /* Stripping the bullet must never eat the first letter of the action. */
+  const words = ['Obtain the letter', 'offer a call', 'o Word sub-bullet', '• Obtain it', '*Order it'];
+  const kept = words.map(w => {
+    const b4 = buildBrief({ companies: [{ ...COMPANIES[1], company: 'Words', owner: 'Rafik',
+                                          next_action: w }], history: [], today: TODAY });
+    const r = b4.pdfData.desks.find(d => d.who === 'Rafik');
+    return r && r.mine[0] ? r.mine[0].actions[0] : '(missing)';
+  });
+  const want = ['Obtain the letter', 'offer a call', 'Word sub-bullet', 'Obtain it', 'Order it'];
+  check('bullet strip keeps the first letter', kept.every((k, i) => k === want[i]),
+        kept.map(k => JSON.stringify(k)).join(' '));
+
   /* The brief is next actions and who owns them. A company nobody has an action
      on does not belong in it -- not on a desk, not as a chase line, not in an
      Unassigned bucket, whatever else it is tagged with. */
