@@ -55,14 +55,13 @@ output can be rendered and checked without sending anything.
   straight into Mina's desk. Do not reintroduce an opener: if something matters
   enough to lead with, it belongs in someone's `next_action`.
 - **The brief is what each person has to do. Everything else is the annex.**
-  Body: the desk openers, then the desks, then the decisions awaiting sign-off.
+  Body: the desks, then the decisions awaiting sign-off.
   Annex, behind a divider: what moved. Nothing in the annex needs doing today,
   which is the test for what belongs there.
-  - Decisions stay in the **body**, not the annex, because `decision_next` is
-    the only place some steps appear at all — "present to the Board at the next
-    meeting" is on no company's `next_action`. Annexing that section would bury
-    the sole mention of it. If a decision's next step is real work, it belongs
-    in `next_action` too, and then the card is safe to move.
+  - Decisions stay in the **body**, not the annex, because `decision_next` can
+    be the only place a step appears — Flend's "present to the Board" was on no
+    `next_action` until 14 September, when the board-memo line was added. If a
+    decision's next step is real work, it belongs in `next_action` too.
 - The brief is organised by **person**, not by company: one block each for Mina,
   Rafik and Reem. **A row is two things: the company, and what that person has
   to do.** Nothing else. **A company appearing on several desks is the point** —
@@ -86,10 +85,8 @@ output can be rendered and checked without sending anything.
   the desk's own blurb says "with someone else" rather than naming one of two.
   `deskRows()` does the grouping so the email and the PDF cannot disagree.
 - **Decisions get their own section.** `decision` / `decision_next` were
-  invisible, and the topline counted "ours to decide" from `status`, so it read
-  0 on the very day two decisions were taken. The topline now counts the
-  decisions themselves, and the pill beside each is derived from `dependency`
-  through `AWAIT`, the same way the deck derives its card pill.
+  otherwise invisible. The pill beside each says who the decision now sits
+  with, derived from `dependency` through `AWAIT` rather than stored.
 - **Tick-box entries are split out of What moved.** "Completed: chase the
   founders" is a task leaving a list, not the position changing, and on a normal
   day they outnumber the real entries and bury them. They collapse to one
@@ -114,21 +111,22 @@ output can be rendered and checked without sending anything.
   where it does not — Legal Counsel is Mina's, Founders / Company is Rafik's,
   Misr Capital and the Board are Reem's — and listed only when that company has
   no line tagged to them already. Each desk carries its own `chaseLabel`
-  rather than the label being inferred from the person's name. One company can therefore sit on several desks with different
-  work, which is the point — Mina approves Flend's extension notice while Reem
-  and Rafik decide the follow-on. Anything reaching no desk appears under
-  **Unassigned** — a company with no tagged action and no dependency channel,
-  which is what happens the moment you clear a `next_action`. That path went
-  years without executing and called a `deskItem()` that had never existed, so
-  the whole brief threw. It now renders through the same `grid()`/`gridRow()`
-  as a desk.
+  rather than the label being inferred from the person's name. One company can
+  therefore sit on several desks with different work, which is the point.
+  **Known gap:** an untagged line whose company `owner` is not one of the three
+  reaches no desk, and with Unassigned gone it does not appear in the brief.
+  The deck's action map names such lines in a footnote rather than dropping
+  them. The Unassigned block that used to catch them also once called a
+  `deskItem()` that had never existed, and took the whole brief down.
 - **An action line's owner prefix must survive the bullet character.**
   `next_action` is meant to be `• ` lines, but people type `*` or `-` or
   nothing. A line typed `*Reem: ...` kept its asterisk, so `parseAction` read
   the owner as `*Reem`, matched nobody, and fell through to the company's
   `owner` — Reem's work appeared on Rafik's desk, with the asterisk showing.
-  `toLines()` strips the common bullets. One character was enough to send the
-  work to the wrong person, so this is covered by a test.
+  `toLines()` in the brief and `parseAction()` in the app share one `BULLET`
+  rule. **The letter o counts as a bullet only with a space after it** (Word's
+  sub-bullet): a first attempt matched any leading o, case-insensitively, and
+  turned "Obtain an update" into "btain an update". Both are covered by tests.
 - **A company with no `next_action` does not appear in the brief at all.** Not
   on a desk, not as a chase line, and there is no Unassigned section any more:
   the brief is next actions and who owns them, so a company nobody has an
@@ -142,7 +140,8 @@ output can be rendered and checked without sending anything.
   that is only a name, every field null. Editing the tracker must never be able
   to stop the morning brief, and that is the only thing standing behind it.
   Run it after touching desk routing, the grid, or anything that reads a
-  company field. It is not decoration: reintroduce the `deskItem` bug and five
+  company field, or the deck. It runs `test/deck.cjs` too, which lifts the
+  deck's code out of `index.html` and checks the action map's columns. It is not decoration: reintroduce the `deskItem` bug and five
   cases fail. It also checks **behaviour, not just that it built** — every
   shape below built fine on 8 September and the brief was still wrong.
 - **A build failure no longer means silence.** `buildBrief` throwing used to
@@ -156,9 +155,8 @@ output can be rendered and checked without sending anything.
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
   overrides to stop Outlook and Gmail inverting the ground back to white under
   light text. Do not reintroduce light values here.
-- **The email is the PDF.** The body is a few plain-text lines — the greeting,
-  the topline and each desk's lead item — so the phone preview is useful, and
-  the brief itself is the attachment. There is one artefact to read, forward
+- **The email is the PDF.** The body is the greeting and one line saying the
+  brief is attached, and the brief itself is the attachment. There is one artefact to read, forward
   and file rather than the same content twice. The HTML is still built and
   still served by `?preview=1`, and it is the **fallback if the PDF fails to
   build**: a brief in the wrong format beats no brief.
@@ -171,18 +169,16 @@ output can be rendered and checked without sending anything.
 - Desks render as a **grid** — company, then what to do — with zebra rows, not
   as prose blocks. The per-company timelines were removed with it: between them
   they made the brief too long to read at 7am.
-- **There is no executive summary.** It restated in four labelled blocks what
-  the rest of the page already said, and pushed the first actual instruction
-  below the fold. The exposure and due-inside-a-week figures it carried are now
-  in the Standing section at the foot, so nothing was lost by dropping it.
-- **The PDF runs the same sections in the same order as the email** — the desk
-  openers, what moved, decided, the desks, then standing. They had drifted:
-  the PDF had no Decided section at all and kept "moved" at the end. Now that
-  the email carries only the PDF, a difference between them is a difference the
-  reader actually gets.
+- **There is no executive summary, and no Standing section.** Both were
+  removed at the user's request, taking the exposure, past-maturity and
+  due-inside-a-week figures with them.
+- **The PDF runs the same sections in the same order as the HTML** — the desks,
+  decided, then the annex with what moved. They once drifted: the PDF had no
+  Decided section at all. Now that the email carries only the PDF, a difference
+  between them is a difference the reader actually gets.
 - The PDF **flows its sections** rather than giving each its own page, breaking only when one would start with
   too little room beneath it. Each opens with a sentence saying what it is for.
-  Page 1 carries the masthead, the topline and the desk openers.
+  Page 1 carries the masthead and runs straight into the first desk.
   Grid rows are placed with `keepTogether()` so none is split across a page.
 - `lib/pdf.js` supplies what PDF itself lacks: Helvetica and Helvetica-Bold
   character widths, a greedy wrapper, a cursor that starts a new page when it
@@ -330,7 +326,7 @@ colour only inside a media query. The two logos are base64 data URIs.
   colours broke the moment the band list got shorter: LEGAL is meant to be a
   bright red `#C00000` so it stands out, and as the fifth of seven bands it
   got that for free — as the third of five it silently became maroon. `at:`
-  indexes into `XL_TRACKER_COLS`, where index 0 is `#`, which stays unbanded.
+  indexes into `XL_TRACKER_COLS`.
 - Dates are written as Excel serials (`xlDate`, days since 1899-12-30).
 - **The status deck (`exportDeck`) is the second export**, the weekly PowerPoint
   for the Chief Venture Officer, generated rather than rebuilt by hand. A
@@ -340,24 +336,28 @@ colour only inside a media query. The two logos are base64 data URIs.
   no layout engine here: `dkLines()` only estimates how tall a table row must
   be and PowerPoint does the real wrapping inside it. Geometry is in EMU,
   914400 to the inch, on an A4 landscape slide.
-  - Four slides: title, CLASSIFICATION (priority and dependency counts),
-    DETAILED STATUS (a row per company), DECISIONS (a card per decision, two
-    to a slide, paginating beyond that and skipped entirely when nothing has
-    been decided). Slide 2's card heights are computed, not fixed, so a fourth
-    priority band cannot run off the bottom.
+  - **A cover and two slides, at the user's request.** DETAILED STATUS: a
+    row per company — company, priority, issue (`issue_title`), latest status
+    (`latest_status`) and TARGETED OUTCOME, which is the tracker's Strategic
+    Target, the `closure` column. ACTION MAP: a row per company that has any
+    action, a column each for Reem, Mina and Rafik in that order, ownership
+    decided exactly as the brief decides it (`dkActionsByPerson`). A company
+    nobody has an action on is left off the map. CLASSIFICATION and DECISIONS
+    were dropped.
+  - **`dkTable()` fits a table by stepping the type down half a point at a
+    time**, from 8.5 to 6, until the estimated rows fit. The previous slide
+    squeezed the row bands instead, which only made room on paper: PowerPoint
+    still wrapped text to its real height and ran one row into the next.
   - **No images.** `zipStore()` encodes each part as UTF-8 text, so a PNG
     cannot pass through it, and carrying the artwork would put base64 in the
     page for every reader on every load. The brand is drawn instead.
-  - `DK_AWAIT` derives the decision card's pill from `dependency` rather than
-    storing it — the pill says who the decision sits with, which is what
-    dependency already records.
-  - Members are listed priority-then-alphabetical. The hand-built deck ordered
-    them by hand; a generated one must not reshuffle week to week.
-- The deck needs four fields beyond the tracker's: `dependency` (one of five
-  channels, `DK_DEPS`), `latest_status` (the one line slide 3 prints, distinct
-  from the long derived situation), and `decision` / `decision_next` for the
-  DECIDED cards. All four are edited from "Edit status & action". The
-  dependency picker carries a **blank first option** on purpose: without it a
-  company with no dependency would show the first channel and silently save it.
+  - Rows are priority-then-alphabetical, so a generated deck does not
+    reshuffle week to week.
+- Four fields beyond the original tracker, all edited from "Edit status &
+  action": `latest_status` (the deck's LATEST STATUS column), `dependency` (one
+  of five channels, `DK_DEPS`, which routes the brief's chase lines), and
+  `decision` / `decision_next` (the brief's Decided section). The dependency
+  picker carries a **blank first option** on purpose: without it a company with
+  no dependency would show the first channel and silently save it.
 - The row detail panel gets its width set in JavaScript (`fitDetail`) because the
   table is wider than the viewport and the panel lives in a sticky cell.

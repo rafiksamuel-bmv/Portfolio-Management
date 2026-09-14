@@ -1576,8 +1576,12 @@
      names counts, so "Note: ..." and "Follow up ... on 23 August: statements"
      are left alone. The brief reads the same tags to build its desks. */
   var PEOPLE=["Mina","Rafik","Reem"];
+  /* Any common bullet, so "*Reem: ..." still finds Reem. The letter o counts
+     only with a space after it (Word's sub-bullet), never as the first letter
+     of "Obtain". Same rule as toLines() in the brief. */
+  var BULLET=/^(?:[\u2022\-*\u00b7\u25aa\u2023\u2013]|o(?=\s))\s*/;
   function parseAction(line){
-    var t=String(line).replace(/^[\u2022\-]\s*/,"").trim();
+    var t=String(line).replace(BULLET,"").trim();
     var m=/^([^:]{1,60}):\s*(.+)$/.exec(t);
     if(m){
       var raw=m[1].split(/,|&|\band\b/).map(function(x){ return x.trim(); }).filter(Boolean);
@@ -2133,17 +2137,6 @@
   /* The five channels a company can be waiting on, in the deck's order. */
   var DK_DEPS=["Founders / Company","Legal Counsel","Internal — ISV / Board",
                "No Dependency","Co-Investor (Misr Capital)"];
-  var DK_DEP_DOT={};
-  DK_DEP_DOT[DK_DEPS[0]]=DKC.maroon; DK_DEP_DOT[DK_DEPS[1]]=DKC.tan;
-  DK_DEP_DOT[DK_DEPS[2]]=DKC.gold;   DK_DEP_DOT[DK_DEPS[3]]=DKC.sand;
-  DK_DEP_DOT[DK_DEPS[4]]=DKC.stone;
-  /* The decision card's pill says who the decision now sits with, which is
-     what dependency already records — so it is derived rather than stored. */
-  var DK_AWAIT={};
-  DK_AWAIT[DK_DEPS[0]]="Awaiting the company"; DK_AWAIT[DK_DEPS[1]]="Awaiting counsel";
-  DK_AWAIT[DK_DEPS[2]]="Awaiting Board";       DK_AWAIT[DK_DEPS[3]]="Ready to proceed";
-  DK_AWAIT[DK_DEPS[4]]="Awaiting Misr Capital";
-
   function dkEmu(i){ return Math.round(i*914400); }
   function dkRun(t,sz,o){
     o=o||{};
@@ -2153,10 +2146,14 @@
   }
   var dkSeq=0;
   function dkSp(o){
-    var body=(o.runs&&o.runs.length)
-      ? '<a:p><a:pPr'+(o.align?' algn="'+o.align+'"':'')+'>'+
-        (o.line?'<a:lnSpc><a:spcPct val="'+Math.round(o.line*100000)+'"/></a:lnSpc>':'')+
-        '</a:pPr>'+o.runs.join("")+'</a:p>'
+    /* o.paras is a list of run-lists, one paragraph each; o.runs is one. */
+    var paras=o.paras || ((o.runs&&o.runs.length) ? [o.runs] : null);
+    var body=paras
+      ? paras.map(function(r,i){
+          return '<a:p><a:pPr'+(o.align?' algn="'+o.align+'"':'')+'>'+
+            (o.line?'<a:lnSpc><a:spcPct val="'+Math.round(o.line*100000)+'"/></a:lnSpc>':'')+
+            (i&&o.gap?'<a:spcBef><a:spcPts val="'+Math.round(o.gap*100)+'"/></a:spcBef>':'')+
+            '</a:pPr>'+r.join("")+'</a:p>'; }).join("")
       : '<a:p><a:endParaRPr lang="en-US"/></a:p>';
     dkSeq++;
     return '<p:sp><p:nvSpPr><p:cNvPr id="'+(dkSeq+1)+'" name="sh'+dkSeq+'"/>'+
@@ -2206,13 +2203,88 @@
       '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>';
   }
 
+  /* A table that fits its slide. Row heights come from an estimate of how many
+     lines each cell wraps to. If the rows will not fit, the type steps down half
+     a point at a time. The old slide squeezed the row bands instead, which only
+     made room on paper: PowerPoint still wrapped the text to its real height and
+     ran one row into the next. Squeezing survives only as the last resort, below
+     six point, where twelve companies cannot reach. */
+  var DK_X=0.55, DK_TW=10.59, DK_HEAD=1.40, DK_TOP=1.78, DK_BOTTOM=7.56;
+  function dkCellH(paras,col,pt){
+    var size=col.big?pt+1:pt, width=col.w-0.16-(col.dot?0.16:0);
+    var lines=paras.reduce(function(n,p){ return n+dkLines(p,width,size*1.08); },0);
+    return lines*size*1.22/72 + Math.max(0,paras.length-1)*2/72;
+  }
+  function dkFit(rows,cols){
+    var avail=DK_BOTTOM-DK_TOP, hs=[], sum=0;
+    for(var pt=8.5; pt>=6; pt-=0.5){
+      hs=rows.map(function(r){
+        var most=0;
+        r.cells.forEach(function(paras,j){ most=Math.max(most, dkCellH(paras,cols[j],pt)); });
+        return Math.max(0.30, most+0.16);
+      });
+      sum=hs.reduce(function(a,b){ return a+b; },0);
+      if(sum<=avail) return {pt:pt, hs:hs};
+    }
+    return {pt:6, hs:hs.map(function(h){ return h*avail/sum; })};
+  }
+  function dkTable(spec){
+    var cols=spec.cols, fit=dkFit(spec.rows,cols), pt=fit.pt, xs=[], x=DK_X;
+    cols.forEach(function(c){ xs.push(x); x+=c.w; });
+    var sh=[dkBrand(), dkHead(spec.title,spec.sub),
+            dkSp({x:DK_X,y:DK_HEAD,w:DK_TW,h:0.34,fill:DKC.ink})];
+    cols.forEach(function(c,j){
+      sh.push(dkSp({x:xs[j]+0.08,y:DK_HEAD,w:c.w-0.16,h:0.34,anchor:"ctr",
+        runs:[dkRun(c.h,8.5,{b:true,c:DKC.gold})]}));
+    });
+    var y=DK_TOP;
+    spec.rows.forEach(function(r,i){
+      var h=fit.hs[i];
+      if(i%2===1) sh.push(dkSp({x:DK_X,y:y,w:DK_TW,h:h,fill:DKC.cream}));
+      r.cells.forEach(function(paras,j){
+        if(!paras.length) return;
+        var c=cols[j], size=c.big?pt+1:pt, ox=c.dot?0.16:0;
+        if(c.dot) sh.push(dkSp({x:xs[j]+0.08, y:y+0.08+size*0.61/72-0.045, w:0.09, h:0.09,
+                                geom:"ellipse", fill:r.dot||DKC.grey}));
+        sh.push(dkSp({x:xs[j]+0.08+ox, y:y+0.08, w:c.w-0.16-ox, h:h-0.10, gap:2,
+          paras:paras.map(function(t){
+            return [dkRun(t,size,{b:!!c.big,c:c.colour||DKC.ink})]; })}));
+      });
+      y+=h;
+    });
+    /* faint rules between the columns, so a wide table reads down as well as across */
+    for(var j=1;j<cols.length;j++)
+      sh.push(dkSp({x:xs[j]-0.005,y:DK_TOP,w:0.01,h:y-DK_TOP,fill:DKC.rule}));
+    if(spec.note) sh.push(dkSp({x:DK_X,y:7.70,w:6.2,h:0.26,
+                                runs:[dkRun(spec.note,8,{c:DKC.muted})]}));
+    sh.push(dkFooter(spec.footer));
+    return sh;
+  }
+
+  /* Who does each action line belong to: its own tag, else the company's owner
+     when the owner is one of the three. Same rule the brief uses for its desks. */
+  var DK_MAP_PEOPLE=["Reem","Mina","Rafik"];
+  function dkActionsByPerson(c){
+    var out={Reem:[],Mina:[],Rafik:[]}, unowned=0;
+    var own=PEOPLE.filter(function(p){
+      return p.toLowerCase()===String(c.owner||"").trim().toLowerCase(); })[0];
+    actionLines(c).forEach(function(line){
+      var a=parseAction(line);
+      if(!a.text) return;
+      var who=a.owners.length ? a.owners : (own ? [own] : []);
+      if(!who.length){ unowned++; return; }
+      who.forEach(function(p){ out[p].push("• "+a.text); });
+    });
+    return {byPerson:out, unowned:unowned};
+  }
+
   function deckSlides(){
     var rows=visible().slice().sort(function(a,b){
       return (sortVal(a,"priority")-sortVal(b,"priority")) ||
              String(a.company).localeCompare(String(b.company)); });
-    var S=[], n=rows.length;
+    var S=[], n=rows.length, plural=function(k,w){ return k+" "+w+(k===1?"":"s"); };
 
-    /* 1 — title */
+    /* cover */
     S.push(dkSlide([
       dkSp({x:0,y:0,w:7.05,h:8.27,fill:DKC.maroon}),
       dkSp({x:2.75,y:3.55,w:8.40,h:2.35,fill:DKC.ink}),
@@ -2225,107 +2297,45 @@
             runs:[dkRun("Legal, Investment & Value Creation",11,{b:true})]})
     ]));
 
-    /* 2 — classification. Card heights are computed rather than fixed so a
-       fourth priority band (Postponed) cannot run off the bottom. */
-    var sh=[dkBrand(), dkHead("CLASSIFICATION",
-      "Priority & dependency breakdown  |  "+n+" item"+(n===1?"":"s")),
-      dkSp({x:0.55,y:1.55,w:5.15,h:0.30,runs:[dkRun("PRIORITY",11,{b:true,c:DKC.maroon})]}),
-      dkSp({x:6.10,y:1.55,w:5.04,h:0.30,
-            runs:[dkRun("DEPENDENCY ON OTHERS",11,{b:true,c:DKC.maroon})]})];
-    var pri=state.lists.priority.filter(function(p){
-      return rows.some(function(c){ return c.priority===p; }); });
-    var ph=Math.min(1.74,(5.55-(pri.length-1)*0.165)/Math.max(1,pri.length));
-    pri.forEach(function(p,i){
-      var m=rows.filter(function(c){ return c.priority===p; })
-                .map(function(c){ return c.company; });
-      var y=1.95+i*(ph+0.165);
-      sh.push(dkSp({x:0.55,y:y,w:5.15,h:ph,fill:DKC.ink}));
-      sh.push(dkSp({x:0.80,y:y+0.08,w:1.10,h:ph-0.16,anchor:"ctr",
-        runs:[dkRun(String(m.length),30,{c:DKC.gold,f:"Arial Black"})]}));
-      sh.push(dkSp({x:1.90,y:y+0.18,w:0.13,h:0.13,geom:"ellipse",
-        fill:DK_PRI_DOT[p]||DKC.grey}));
-      sh.push(dkSp({x:2.10,y:y+0.09,w:3.40,h:0.32,
-        runs:[dkRun(p,14.5,{b:true,c:DKC.white})]}));
-      sh.push(dkSp({x:1.90,y:y+0.42,w:3.55,h:ph-0.5,line:1.3,
-        runs:[dkRun(m.join(", "),9.5,{c:DKC.dim})]}));
-    });
-    var dep=DK_DEPS.filter(function(d){
-      return rows.some(function(c){ return c.dependency===d; }); });
-    var dh=Math.min(1.01,(5.55-(dep.length-1)*0.125)/Math.max(1,dep.length));
-    dep.forEach(function(d,i){
-      var m=rows.filter(function(c){ return c.dependency===d; })
-                .map(function(c){ return c.company; });
-      var y=1.95+i*(dh+0.125);
-      sh.push(dkSp({x:6.10,y:y,w:5.04,h:dh,fill:DKC.cream}));
-      sh.push(dkSp({x:6.30,y:y+0.44,w:0.13,h:0.13,geom:"ellipse",
-        fill:DK_DEP_DOT[d]||DKC.grey}));
-      sh.push(dkSp({x:6.52,y:y+0.07,w:4.04,h:0.28,runs:[dkRun(d,12,{b:true})]}));
-      sh.push(dkSp({x:10.59,y:y,w:0.40,h:dh,anchor:"ctr",align:"r",
-        runs:[dkRun(String(m.length),16,{b:true,c:DKC.maroon})]}));
-      sh.push(dkSp({x:6.52,y:y+0.34,w:4.14,h:dh-0.4,line:1.25,
-        runs:[dkRun(m.join(", "),9,{c:DKC.muted})]}));
-    });
-    sh.push(dkFooter(2)); S.push(dkSlide(sh));
+    /* detailed status, with the targeted outcome. That is the tracker's
+       Strategic Target, which is the `closure` column. */
+    S.push(dkSlide(dkTable({
+      title:"DETAILED STATUS",
+      sub:"Issue, latest status and targeted outcome  |  "+plural(n,"item"),
+      footer:2,
+      cols:[{h:"COMPANY",w:1.30,big:true,colour:DKC.maroon},
+            {h:"PRIORITY",w:0.95,dot:true},
+            {h:"ISSUE CURRENTLY ADDRESSED",w:2.45},
+            {h:"LATEST STATUS",w:3.05,colour:DKC.muted},
+            {h:"TARGETED OUTCOME",w:2.84}],
+      rows:rows.map(function(c){
+        var t=function(v){ v=String(v||"").trim(); return v?[v]:[]; };
+        return {dot:DK_PRI_DOT[c.priority]||DKC.grey,
+                cells:[t(c.company), t(c.priority), t(c.issueTitle),
+                       t(c.latestStatus), t(c.closure)]}; })
+    })));
 
-    /* 3 — detailed status */
-    sh=[dkBrand(), dkHead("DETAILED STATUS",
-      "Company-level issue & latest status  |  "+n+" item"+(n===1?"":"s")),
-      dkSp({x:0.55,y:1.55,w:10.59,h:0.32,fill:DKC.ink}),
-      dkSp({x:0.63,y:1.55,w:1.37,h:0.32,anchor:"ctr",
-        runs:[dkRun("COMPANY",8.5,{b:true,c:DKC.gold})]}),
-      dkSp({x:2.20,y:1.55,w:0.87,h:0.32,anchor:"ctr",
-        runs:[dkRun("PRIORITY",8.5,{b:true,c:DKC.gold})]}),
-      dkSp({x:3.30,y:1.55,w:3.17,h:0.32,anchor:"ctr",
-        runs:[dkRun("ISSUE CURRENTLY ADDRESSED",8.5,{b:true,c:DKC.gold})]}),
-      dkSp({x:6.73,y:1.55,w:4.41,h:0.32,anchor:"ctr",
-        runs:[dkRun("LATEST STATUS",8.5,{b:true,c:DKC.gold})]})];
-    var hs=rows.map(function(c){
-      return Math.max(0.32, Math.max(dkLines(c.issueTitle,3.15,8.5),
-                                     dkLines(c.latestStatus,4.41,8.5))*0.148+0.13); });
-    var sum=hs.reduce(function(a,b){ return a+b; },0), avail=5.50;
-    if(sum>avail){ var k=avail/sum; hs=hs.map(function(h){ return h*k; }); }
-    var y=1.90;
-    rows.forEach(function(c,i){
-      if(i%2===1) sh.push(dkSp({x:0.55,y:y,w:10.59,h:hs[i],fill:DKC.cream}));
-      sh.push(dkSp({x:0.63,y:y,w:1.35,h:hs[i],
-        runs:[dkRun(c.company,9.5,{b:true,c:DKC.maroon})]}));
-      sh.push(dkSp({x:2.12,y:y+0.06,w:0.09,h:0.09,geom:"ellipse",
-        fill:DK_PRI_DOT[c.priority]||DKC.grey}));
-      sh.push(dkSp({x:2.28,y:y,w:0.79,h:hs[i],runs:[dkRun(c.priority,8.5)]}));
-      sh.push(dkSp({x:3.22,y:y,w:3.15,h:hs[i],line:1.25,
-        runs:[dkRun(c.issueTitle||"—",8.5)]}));
-      sh.push(dkSp({x:6.65,y:y,w:4.41,h:hs[i],line:1.25,
-        runs:[dkRun(c.latestStatus||"—",8.5,{c:DKC.muted})]}));
-      y+=hs[i];
+    /* action map: a row per company that has any action, a column per person.
+       A company nobody has an action on is left out, as it is in the brief. */
+    var unowned=0, mapRows=[];
+    rows.forEach(function(c){
+      var a=dkActionsByPerson(c);
+      unowned+=a.unowned;
+      if(!DK_MAP_PEOPLE.some(function(p){ return a.byPerson[p].length; })) return;
+      mapRows.push({cells:[[c.company]].concat(
+        DK_MAP_PEOPLE.map(function(p){ return a.byPerson[p]; }))});
     });
-    sh.push(dkFooter(3)); S.push(dkSlide(sh));
-
-    /* 4 — decisions, two cards to a slide. Skipped entirely when nothing has
-       been decided, rather than shipping an empty slide. */
-    var dec=rows.filter(function(c){ return String(c.decision||"").trim(); });
-    for(var p0=0;p0<dec.length;p0+=2){
-      var pair=dec.slice(p0,p0+2);
-      var ds=[dkBrand(), dkHead("DECISIONS",
-        "Ready to move forward — internal decision complete")];
-      pair.forEach(function(c,j){
-        var x=0.55+j*5.54;
-        ds.push(dkSp({x:x,y:1.75,w:5.04,h:5.20,fill:DKC.cream}));
-        ds.push(dkSp({x:x+0.45,y:2.15,w:3.00,h:0.34,
-          runs:[dkRun("DECIDED",11,{b:true,c:DKC.tan})]}));
-        ds.push(dkSp({x:x+0.45,y:2.53,w:4.14,h:0.65,
-          runs:[dkRun(c.company,26,{b:true,c:DKC.maroon})]}));
-        ds.push(dkSp({x:x+0.45,y:3.30,w:4.14,h:1.60,line:1.25,
-          runs:[dkRun(c.decision,15)]}));
-        ds.push(dkSp({x:x+0.45,y:5.10,w:4.14,h:0.02,fill:DKC.rule}));
-        ds.push(dkSp({x:x+0.45,y:5.30,w:4.14,h:0.80,line:1.25,
-          runs:[dkRun(c.decisionNext||"",13,{c:DKC.muted})]}));
-        ds.push(dkSp({x:x+0.45,y:6.15,w:3.00,h:0.46,fill:j?DKC.tan:DKC.maroon}));
-        ds.push(dkSp({x:x+0.45,y:6.15,w:3.00,h:0.46,anchor:"ctr",align:"ctr",
-          runs:[dkRun(DK_AWAIT[c.dependency]||"Next step agreed",12,
-                      {b:true,c:DKC.white})]}));
-      });
-      ds.push(dkFooter(S.length+1)); S.push(dkSlide(ds));
-    }
+    S.push(dkSlide(dkTable({
+      title:"ACTION MAP",
+      sub:"Who owns each next action  |  "+mapRows.length+(mapRows.length===1?" company":" companies"),
+      footer:3,
+      cols:[{h:"COMPANY",w:1.30,big:true,colour:DKC.maroon},
+            {h:"REEM",w:3.10},{h:"MINA",w:3.10},{h:"RAFIK",w:3.09}],
+      rows:mapRows,
+      /* never silent: an action with no owner is named, not dropped quietly */
+      note: unowned ? plural(unowned,"action line")+" in the tracker "+
+                      (unowned===1?"has":"have")+" no owner and "+(unowned===1?"is":"are")+" not shown." : ""
+    })));
     return S;
   }
 

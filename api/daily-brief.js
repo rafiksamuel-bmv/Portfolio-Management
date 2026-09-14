@@ -158,10 +158,14 @@ function doneRecent(history, c, n) {
    keyboard gives them. Strip * and the other common bullets too: a line typed
    "*Reem: ..." kept its asterisk, so parseAction saw the owner as "*Reem",
    matched nobody, and quietly delivered Reem's action to the company's owner
-   instead. One character sent the work to the wrong desk. */
+   instead. One character sent the work to the wrong desk.
+   The letter o counts only when a space follows it (Word's sub-bullet). An
+   earlier version matched any leading o, case-insensitively, and so turned
+   "Obtain an update" into "btain an update". */
+const BULLET = /^(?:[•\-*·▪‣–]|o(?=\s))\s*/;
 function toLines(text) {
   return String(text || '').split('\n')
-    .map(l => l.replace(/^[•\-*·▪‣o]\s*/i, '').trim()).filter(Boolean);
+    .map(l => l.replace(BULLET, '').trim()).filter(Boolean);
 }
 
 const PEOPLE = ['Mina', 'Rafik', 'Reem'];
