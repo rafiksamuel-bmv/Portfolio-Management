@@ -55,13 +55,14 @@ output can be rendered and checked without sending anything.
   straight into Mina's desk. Do not reintroduce an opener: if something matters
   enough to lead with, it belongs in someone's `next_action`.
 - **The brief is what each person has to do. Everything else is the annex.**
-  Body: the desks, then the decisions awaiting sign-off.
-  Annex, behind a divider: what moved. Nothing in the annex needs doing today,
-  which is the test for what belongs there.
-  - Decisions stay in the **body**, not the annex, because `decision_next` can
-    be the only place a step appears — Flend's "present to the Board" was on no
-    `next_action` until 14 September, when the board-memo line was added. If a
-    decision's next step is real work, it belongs in `next_action` too.
+  Body: the desks. Annex, behind a divider: what moved and the "Also ticked
+  off" line. Nothing in the annex needs doing today, which is the test for what
+  belongs there.
+- **There is no Decided section.** `decision` / `decision_next` were retired on
+  15 September, in the app, the brief and the deck: a step that is real work
+  belongs in `next_action`, where it reaches a desk. The columns are still in
+  the database and nothing reads them. A test checks a stored decision does not
+  print. Do not bring the section back to surface them.
 - The brief is organised by **person**, not by company: one block each for Mina,
   Rafik and Reem. **A row is two things: the company, and what that person has
   to do.** Nothing else. **A company appearing on several desks is the point** —
@@ -84,9 +85,6 @@ output can be rendered and checked without sending anything.
   a company that reached the desk through `status` with no dependency set, and
   the desk's own blurb says "with someone else" rather than naming one of two.
   `deskRows()` does the grouping so the email and the PDF cannot disagree.
-- **Decisions get their own section.** `decision` / `decision_next` were
-  otherwise invisible. The pill beside each says who the decision now sits
-  with, derived from `dependency` through `AWAIT` rather than stored.
 - **Tick-box entries are split out of What moved.** "Completed: chase the
   founders" is a task leaving a list, not the position changing, and on a normal
   day they outnumber the real entries and bury them. They collapse to one
@@ -141,8 +139,9 @@ output can be rendered and checked without sending anything.
   to stop the morning brief, and that is the only thing standing behind it.
   Run it after touching desk routing, the grid, or anything that reads a
   company field, or the deck. It runs `test/deck.cjs` too, which lifts the
-  deck's code out of `index.html` and checks the action map's columns. It is not decoration: reintroduce the `deskItem` bug and five
-  cases fail. It also checks **behaviour, not just that it built** — every
+  deck's code out of `index.html` and checks the action map's columns, the
+  10pt type and the pagination. It is not decoration: reintroduce the
+  `deskItem` bug and five cases fail. It also checks **behaviour, not just that it built** — every
   shape below built fine on 8 September and the brief was still wrong.
 - **A build failure no longer means silence.** `buildBrief` throwing used to
   return 502 from the cron, so nobody was sent anything and nobody was told.
@@ -173,9 +172,12 @@ output can be rendered and checked without sending anything.
   removed at the user's request, taking the exposure, past-maturity and
   due-inside-a-week figures with them.
 - **The PDF runs the same sections in the same order as the HTML** — the desks,
-  decided, then the annex with what moved. They once drifted: the PDF had no
-  Decided section at all. Now that the email carries only the PDF, a difference
-  between them is a difference the reader actually gets.
+  then the annex with what moved. They once drifted apart. Now that the email
+  carries only the PDF, a difference between them is a difference the reader
+  actually gets.
+- **Neither "internal" nor "confidential" appears in it** (see Domain rules).
+  The masthead read "Prepared by Rafik for internal review" until 15 September.
+  A test reads the HTML, the email text and the PDF for both words.
 - The PDF **flows its sections** rather than giving each its own page, breaking only when one would start with
   too little room beneath it. Each opens with a sentence saying what it is for.
   Page 1 carries the masthead and runs straight into the first desk.
@@ -336,7 +338,7 @@ colour only inside a media query. The two logos are base64 data URIs.
   no layout engine here: `dkLines()` only estimates how tall a table row must
   be and PowerPoint does the real wrapping inside it. Geometry is in EMU,
   914400 to the inch, on an A4 landscape slide.
-  - **A cover and two slides, at the user's request.** DETAILED STATUS: a
+  - **A cover and two tables, at the user's request.** DETAILED STATUS: a
     row per company — company, priority, issue (`issue_title`), latest status
     (`latest_status`) and TARGETED OUTCOME, which is the tracker's Strategic
     Target, the `closure` column. ACTION MAP: a row per company that has any
@@ -344,19 +346,34 @@ colour only inside a media query. The two logos are base64 data URIs.
     decided exactly as the brief decides it (`dkActionsByPerson`). A company
     nobody has an action on is left off the map. CLASSIFICATION and DECISIONS
     were dropped.
-  - **`dkTable()` fits a table by stepping the type down half a point at a
-    time**, from 8.5 to 6, until the estimated rows fit. The previous slide
-    squeezed the row bands instead, which only made room on paper: PowerPoint
-    still wrapped text to its real height and ran one row into the next.
+  - **Table type is fixed at 10pt, company names 11pt, and a table that does
+    not fit carries on to another slide** (`dkTables()` returns one slide per
+    page). It splits only between rows, repeats the header, and adds "1 of 2"
+    to the subtitle. The user asked for 10pt and chose continuation over
+    shrinking. Do not reintroduce fitting by shrinking the type: an earlier
+    `dkTable()` stepped down to 6pt and put twelve companies on one slide,
+    unreadably. Squeezing the row bands is no better — PowerPoint still wraps
+    text to its real height and runs one row into the next.
+  - **`dkPages()` balances the pages**: it finds how few slides the rows need,
+    then the smallest per-slide capacity that still needs no more, and packs to
+    that. Greedy packing left a second slide holding one straggling row.
+  - Action map cells use **PowerPoint's own bullets** (`buChar`, with a hanging
+    indent so a wrapped line sits under the text, not the dot). The action text
+    itself carries no "•"; a typed one would double up.
+  - Row heights come from `dkLines()`, which estimates wrapping at 1.08× the
+    point size, deliberately generous: a row slightly too tall looks loose, a
+    row too short overlaps the next one.
   - **No images.** `zipStore()` encodes each part as UTF-8 text, so a PNG
     cannot pass through it, and carrying the artwork would put base64 in the
     page for every reader on every load. The brand is drawn instead.
   - Rows are priority-then-alphabetical, so a generated deck does not
     reshuffle week to week.
-- Four fields beyond the original tracker, all edited from "Edit status &
-  action": `latest_status` (the deck's LATEST STATUS column), `dependency` (one
-  of five channels, `DK_DEPS`, which routes the brief's chase lines), and
-  `decision` / `decision_next` (the brief's Decided section). The dependency
+- Three fields beyond the original tracker, all edited from "Edit status &
+  action": `issue_title`, `latest_status` (the deck's LATEST STATUS column) and
+  `dependency` (one of five channels, `DK_DEPS`, which routes the brief's chase
+  lines). `decision` / `decision_next` were removed from the form on 15
+  September and are no longer in `CO_COLS`; the columns stay in the schema,
+  unused, so no migration is needed. The dependency
   picker carries a **blank first option** on purpose: without it a company with
   no dependency would show the first channel and silently save it.
 - The row detail panel gets its width set in JavaScript (`fitDetail`) because the

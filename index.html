@@ -813,10 +813,11 @@
     /* situation is deliberately absent: Latest Situation is derived from the
        newest History entry, never stored on the company. */
     priority:"priority", nextAction:"next_action", closure:"closure", issueTitle:"issue_title", owner:"owner",
-    /* The status deck's fields: who we are waiting on, the one-line status it
-       prints, and the decision card when one has been taken. */
+    /* Who we are waiting on, and the one-line status the deck prints. The
+       decision / decision_next columns still exist in the database but nothing
+       reads or writes them: they fed the deck's DECISIONS slide and the brief's
+       Decided section, and both are gone. */
     dependency:"dependency", latestStatus:"latest_status",
-    decision:"decision", decisionNext:"decision_next",
     due:"due", legalNext:"legal_next", legalReq:"legal_req", targetFeedback:"target_feedback",
     vcTrack:"vc_track", vcPlan:"vc_plan", lastUpdated:"last_updated", legalRaisedAt:"legal_raised_at" };
 
@@ -1445,13 +1446,8 @@
          the first option and silently save it on the next edit. */
       '<div><label>Waiting on</label>'+sel("dependency",[""].concat(DK_DEPS),c.dependency)+'</div>'+
       '<div class="full"><label>Latest status '+
-        '<span class="hint-inline">one line, the deck\'s right-hand column</span></label>'+
+        '<span class="hint-inline">one line, printed in the deck\'s LATEST STATUS column</span></label>'+
         '<input data-f="latestStatus" value="'+esc(c.latestStatus)+'"></div>'+
-      '<div class="full"><label>Decision taken '+
-        '<span class="hint-inline">fills a card on the deck\'s DECISIONS slide; leave empty if none</span></label>'+
-        '<textarea data-f="decision">'+esc(c.decision)+'</textarea></div>'+
-      '<div class="full"><label>Decision — next step</label>'+
-        '<input data-f="decisionNext" value="'+esc(c.decisionNext)+'"></div>'+
       '<div class="full"><label>Situation update '+
         '<span class="hint-inline">logged to History and becomes the Latest Situation; leave empty to keep the current one</span></label>'+
         '<textarea data-f="situation" placeholder="What has happened since '+
@@ -1741,8 +1737,7 @@
       if(sit && !isYmd(sitDate)){ toast("The situation update date must look like 2026-09-02.","bad"); return; }
       var v={issueType:fv(w,"issueType"),priority:fv(w,"priority"),bucket:fv(w,"bucket"),owner:fv(w,"owner"),
              due:fv(w,"due"),nextAction:fv(w,"nextAction"),closure:fv(w,"closure"),issueTitle:fv(w,"issueTitle"),
-             dependency:fv(w,"dependency"),latestStatus:fv(w,"latestStatus"),
-             decision:fv(w,"decision"),decisionNext:fv(w,"decisionNext")};
+             dependency:fv(w,"dependency"),latestStatus:fv(w,"latestStatus")};
       editing=null;
       v.lastUpdated=today();
       saveCompany(c.id, v, function(s){
@@ -2148,11 +2143,16 @@
   function dkSp(o){
     /* o.paras is a list of run-lists, one paragraph each; o.runs is one. */
     var paras=o.paras || ((o.runs&&o.runs.length) ? [o.runs] : null);
+    /* o.bullet: PowerPoint's own bullet with a hanging indent, so a wrapped
+       second line lines up under the text rather than under the dot. */
+    var ind=dkEmu(DK_BULLET_IN);
     var body=paras
       ? paras.map(function(r,i){
-          return '<a:p><a:pPr'+(o.align?' algn="'+o.align+'"':'')+'>'+
+          return '<a:p><a:pPr'+(o.bullet?' marL="'+ind+'" indent="-'+ind+'"':'')+
+            (o.align?' algn="'+o.align+'"':'')+'>'+
             (o.line?'<a:lnSpc><a:spcPct val="'+Math.round(o.line*100000)+'"/></a:lnSpc>':'')+
             (i&&o.gap?'<a:spcBef><a:spcPts val="'+Math.round(o.gap*100)+'"/></a:spcBef>':'')+
+            (o.bullet?'<a:buFont typeface="Arial"/><a:buChar char="\u2022"/>':'')+
             '</a:pPr>'+r.join("")+'</a:p>'; }).join("")
       : '<a:p><a:endParaRPr lang="en-US"/></a:p>';
     dkSeq++;
@@ -2203,62 +2203,80 @@
       '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>';
   }
 
-  /* A table that fits its slide. Row heights come from an estimate of how many
-     lines each cell wraps to. If the rows will not fit, the type steps down half
-     a point at a time. The old slide squeezed the row bands instead, which only
-     made room on paper: PowerPoint still wrapped the text to its real height and
-     ran one row into the next. Squeezing survives only as the last resort, below
-     six point, where twelve companies cannot reach. */
-  var DK_X=0.55, DK_TW=10.59, DK_HEAD=1.40, DK_TOP=1.78, DK_BOTTOM=7.56;
-  function dkCellH(paras,col,pt){
-    var size=col.big?pt+1:pt, width=col.w-0.16-(col.dot?0.16:0);
+  /* Tables are set at a fixed size -- 10pt, company names 11pt -- chosen for
+     legibility, and paginated rather than shrunk: a table that will not fit
+     carries on to another slide, splitting only between rows and repeating its
+     header. An earlier version shrank the type until everything fitted on one
+     slide, which put twelve companies at 7pt. Row heights come from an estimate
+     of how many lines each cell wraps to; PowerPoint does the real wrapping. */
+  var DK_X=0.55, DK_TW=10.59, DK_HEAD=1.40, DK_HEAD_H=0.38, DK_TOP=1.80, DK_BOTTOM=7.56;
+  var DK_PT=10, DK_PAD=0.10, DK_BULLET_IN=0.15;
+  function dkCellH(paras,col){
+    var size=col.big?DK_PT+1:DK_PT;
+    var width=col.w-2*DK_PAD-(col.dot?0.18:0)-(col.bullet?DK_BULLET_IN:0);
     var lines=paras.reduce(function(n,p){ return n+dkLines(p,width,size*1.08); },0);
-    return lines*size*1.22/72 + Math.max(0,paras.length-1)*2/72;
+    return lines*size*1.2/72 + Math.max(0,paras.length-1)*3/72;
   }
-  function dkFit(rows,cols){
-    var avail=DK_BOTTOM-DK_TOP, hs=[], sum=0;
-    for(var pt=8.5; pt>=6; pt-=0.5){
-      hs=rows.map(function(r){
-        var most=0;
-        r.cells.forEach(function(paras,j){ most=Math.max(most, dkCellH(paras,cols[j],pt)); });
-        return Math.max(0.30, most+0.16);
-      });
-      sum=hs.reduce(function(a,b){ return a+b; },0);
-      if(sum<=avail) return {pt:pt, hs:hs};
-    }
-    return {pt:6, hs:hs.map(function(h){ return h*avail/sum; })};
+  function dkRowH(r,cols){
+    var most=0;
+    r.cells.forEach(function(paras,j){ most=Math.max(most, dkCellH(paras,cols[j])); });
+    return Math.max(0.40, most+0.32);
   }
-  function dkTable(spec){
-    var cols=spec.cols, fit=dkFit(spec.rows,cols), pt=fit.pt, xs=[], x=DK_X;
+  /* As few slides as the rows need, then balanced across them, so a second
+     slide never holds a single straggling row. It finds the smallest page
+     capacity that still needs no more slides, and packs to that. */
+  function dkPages(hs,avail){
+    var count=function(cap){ var n=1,u=0;
+      hs.forEach(function(h){ if(u && u+h>cap){ n++; u=0; } u+=h; }); return n; };
+    var tallest=hs.length ? Math.max.apply(null,hs) : 0;
+    var hi=Math.max(avail,tallest), k=count(hi), lo=tallest;
+    for(var i=0;i<40;i++){ var mid=(lo+hi)/2; if(count(mid)<=k) hi=mid; else lo=mid; }
+    var pages=[[]], u=0;
+    hs.forEach(function(h,idx){
+      if(u && u+h>hi+1e-6){ pages.push([]); u=0; }
+      pages[pages.length-1].push(idx); u+=h;
+    });
+    return pages;
+  }
+  /* Returns one slide's worth of shapes per page the table needs. */
+  function dkTables(spec){
+    var cols=spec.cols, xs=[], x=DK_X;
     cols.forEach(function(c){ xs.push(x); x+=c.w; });
-    var sh=[dkBrand(), dkHead(spec.title,spec.sub),
-            dkSp({x:DK_X,y:DK_HEAD,w:DK_TW,h:0.34,fill:DKC.ink})];
-    cols.forEach(function(c,j){
-      sh.push(dkSp({x:xs[j]+0.08,y:DK_HEAD,w:c.w-0.16,h:0.34,anchor:"ctr",
-        runs:[dkRun(c.h,8.5,{b:true,c:DKC.gold})]}));
-    });
-    var y=DK_TOP;
-    spec.rows.forEach(function(r,i){
-      var h=fit.hs[i];
-      if(i%2===1) sh.push(dkSp({x:DK_X,y:y,w:DK_TW,h:h,fill:DKC.cream}));
-      r.cells.forEach(function(paras,j){
-        if(!paras.length) return;
-        var c=cols[j], size=c.big?pt+1:pt, ox=c.dot?0.16:0;
-        if(c.dot) sh.push(dkSp({x:xs[j]+0.08, y:y+0.08+size*0.61/72-0.045, w:0.09, h:0.09,
-                                geom:"ellipse", fill:r.dot||DKC.grey}));
-        sh.push(dkSp({x:xs[j]+0.08+ox, y:y+0.08, w:c.w-0.16-ox, h:h-0.10, gap:2,
-          paras:paras.map(function(t){
-            return [dkRun(t,size,{b:!!c.big,c:c.colour||DKC.ink})]; })}));
+    var hs=spec.rows.map(function(r){ return dkRowH(r,cols); });
+    var pages=dkPages(hs, DK_BOTTOM-DK_TOP);
+    return pages.map(function(idxs,pi){
+      var sh=[dkBrand(),
+        dkHead(spec.title, spec.sub+(pages.length>1 ? "  |  "+(pi+1)+" of "+pages.length : "")),
+        dkSp({x:DK_X,y:DK_HEAD,w:DK_TW,h:DK_HEAD_H,fill:DKC.ink})];
+      cols.forEach(function(c,j){
+        sh.push(dkSp({x:xs[j]+DK_PAD,y:DK_HEAD,w:c.w-2*DK_PAD,h:DK_HEAD_H,anchor:"ctr",
+          runs:[dkRun(c.h,9,{b:true,c:DKC.gold})]}));
       });
-      y+=h;
+      var y=DK_TOP;
+      idxs.forEach(function(ri,i){
+        var r=spec.rows[ri], h=hs[ri];
+        if(i%2===1) sh.push(dkSp({x:DK_X,y:y,w:DK_TW,h:h,fill:DKC.cream}));
+        r.cells.forEach(function(paras,j){
+          if(!paras.length) return;
+          var c=cols[j], size=c.big?DK_PT+1:DK_PT, ox=c.dot?0.18:0;
+          if(c.dot) sh.push(dkSp({x:xs[j]+DK_PAD, y:y+0.12+size*0.6/72-0.05, w:0.10, h:0.10,
+                                  geom:"ellipse", fill:r.dot||DKC.grey}));
+          sh.push(dkSp({x:xs[j]+DK_PAD+ox, y:y+0.12, w:c.w-2*DK_PAD-ox, h:h-0.14, gap:3,
+            bullet:!!c.bullet,
+            paras:paras.map(function(t){
+              return [dkRun(t,size,{b:!!c.big,c:c.colour||DKC.ink})]; })}));
+        });
+        y+=h;
+      });
+      /* faint rules down the columns and one to close the table */
+      for(var j=1;j<cols.length;j++)
+        sh.push(dkSp({x:xs[j]-0.005,y:DK_TOP,w:0.01,h:y-DK_TOP,fill:DKC.rule}));
+      sh.push(dkSp({x:DK_X,y:y,w:DK_TW,h:0.015,fill:DKC.rule}));
+      if(spec.note && pi===pages.length-1)
+        sh.push(dkSp({x:DK_X,y:7.70,w:6.2,h:0.26,runs:[dkRun(spec.note,8,{c:DKC.muted})]}));
+      sh.push(dkFooter(spec.firstPage+pi));
+      return sh;
     });
-    /* faint rules between the columns, so a wide table reads down as well as across */
-    for(var j=1;j<cols.length;j++)
-      sh.push(dkSp({x:xs[j]-0.005,y:DK_TOP,w:0.01,h:y-DK_TOP,fill:DKC.rule}));
-    if(spec.note) sh.push(dkSp({x:DK_X,y:7.70,w:6.2,h:0.26,
-                                runs:[dkRun(spec.note,8,{c:DKC.muted})]}));
-    sh.push(dkFooter(spec.footer));
-    return sh;
   }
 
   /* Who does each action line belong to: its own tag, else the company's owner
@@ -2273,7 +2291,7 @@
       if(!a.text) return;
       var who=a.owners.length ? a.owners : (own ? [own] : []);
       if(!who.length){ unowned++; return; }
-      who.forEach(function(p){ out[p].push("• "+a.text); });
+      who.forEach(function(p){ out[p].push(a.text); });
     });
     return {byPerson:out, unowned:unowned};
   }
@@ -2299,21 +2317,22 @@
 
     /* detailed status, with the targeted outcome. That is the tracker's
        Strategic Target, which is the `closure` column. */
-    S.push(dkSlide(dkTable({
+    var status=dkTables({
       title:"DETAILED STATUS",
       sub:"Issue, latest status and targeted outcome  |  "+plural(n,"item"),
-      footer:2,
-      cols:[{h:"COMPANY",w:1.30,big:true,colour:DKC.maroon},
-            {h:"PRIORITY",w:0.95,dot:true},
-            {h:"ISSUE CURRENTLY ADDRESSED",w:2.45},
-            {h:"LATEST STATUS",w:3.05,colour:DKC.muted},
-            {h:"TARGETED OUTCOME",w:2.84}],
+      firstPage:2,
+      cols:[{h:"COMPANY",w:1.45,big:true,colour:DKC.maroon},
+            {h:"PRIORITY",w:1.15,dot:true},
+            {h:"ISSUE CURRENTLY ADDRESSED",w:2.35},
+            {h:"LATEST STATUS",w:3.00,colour:DKC.muted},
+            {h:"TARGETED OUTCOME",w:2.64}],
       rows:rows.map(function(c){
         var t=function(v){ v=String(v||"").trim(); return v?[v]:[]; };
         return {dot:DK_PRI_DOT[c.priority]||DKC.grey,
                 cells:[t(c.company), t(c.priority), t(c.issueTitle),
                        t(c.latestStatus), t(c.closure)]}; })
-    })));
+    });
+    status.forEach(function(sh){ S.push(dkSlide(sh)); });
 
     /* action map: a row per company that has any action, a column per person.
        A company nobody has an action on is left out, as it is in the brief. */
@@ -2325,17 +2344,18 @@
       mapRows.push({cells:[[c.company]].concat(
         DK_MAP_PEOPLE.map(function(p){ return a.byPerson[p]; }))});
     });
-    S.push(dkSlide(dkTable({
+    dkTables({
       title:"ACTION MAP",
       sub:"Who owns each next action  |  "+mapRows.length+(mapRows.length===1?" company":" companies"),
-      footer:3,
-      cols:[{h:"COMPANY",w:1.30,big:true,colour:DKC.maroon},
-            {h:"REEM",w:3.10},{h:"MINA",w:3.10},{h:"RAFIK",w:3.09}],
+      firstPage:2+status.length,
+      cols:[{h:"COMPANY",w:1.45,big:true,colour:DKC.maroon},
+            {h:"REEM",w:3.05,bullet:true},{h:"MINA",w:3.05,bullet:true},
+            {h:"RAFIK",w:3.04,bullet:true}],
       rows:mapRows,
       /* never silent: an action with no owner is named, not dropped quietly */
       note: unowned ? plural(unowned,"action line")+" in the tracker "+
                       (unowned===1?"has":"have")+" no owner and "+(unowned===1?"is":"are")+" not shown." : ""
-    })));
+    }).forEach(function(sh){ S.push(dkSlide(sh)); });
     return S;
   }
 

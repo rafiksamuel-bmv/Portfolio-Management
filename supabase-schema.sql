@@ -34,8 +34,8 @@ create table if not exists public.companies (
   issue_title     text,
   dependency      text,
   latest_status   text,
-  decision        text,
-  decision_next   text,
+  decision        text,          -- retired 15 Sep 2026, nothing reads it
+  decision_next   text,          -- retired 15 Sep 2026, nothing reads it
   owner           text,
   due             text,
   legal_next      text,
