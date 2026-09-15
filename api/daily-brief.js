@@ -65,16 +65,6 @@ const CHASE_LABEL = {
   'Co-Investor (Misr Capital)': 'With Misr Capital',
 };
 
-/* Who a decision now sits with. Derived from dependency rather than stored,
-   the same way the status deck derives its card pill. */
-const AWAIT = {
-  'Founders / Company':         'Awaiting the company',
-  'Legal Counsel':              'Awaiting counsel',
-  'Internal — ISV / Board':     'Awaiting Board',
-  'No Dependency':              'Ready to proceed',
-  'Co-Investor (Misr Capital)': 'Awaiting Misr Capital',
-};
-
 /* A short human opening, so the brief starts like a note from a colleague
    rather than a report header. Varies by weekday so it does not read canned. */
 function greeting(now) {
@@ -274,7 +264,6 @@ export function buildBrief({ companies, history, today }) {
   const counts = {};
   ['Pending legal', 'Pending company', 'Pending our action'].forEach(k => {
     counts[k] = byNum.filter(c => c.status === k).length; });
-  const decided = byNum.filter(c => String(c.decision || '').trim());
   const movedReal = moved.filter(h => h.source !== DONE_SRC);
   const movedDone = moved.filter(h => h.source === DONE_SRC);
 
@@ -362,12 +351,10 @@ export function buildBrief({ companies, history, today }) {
         letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">COMPANY</td>
     <td style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
         letter-spacing:.08em;color:${C.faint};border-bottom:1.5px solid ${C.line};">WHAT TO DO</td>
-    <td align="right" style="padding:0 10px 5px;font-size:8.5px;font-family:${MONO};font-weight:700;
   </tr>`;
 
   /* rows is an array: interpolating it directly would join it with commas,
-     which rendered as a stray "," between every row of every desk. Shared with
-     the Unassigned block below, which has to render the same way. */
+     which rendered as a stray "," between every row of every desk. */
   const grid = rows => `<table width="100%" cellpadding="0" cellspacing="0"
       style="margin-top:4px;">${gridHead}${rows.join('')}</table>`;
 
@@ -419,23 +406,6 @@ export function buildBrief({ companies, history, today }) {
       } · ${movedDone.length} action${movedDone.length === 1 ? '' : 's'}.</div>`
     : '';
 
-  /* ---- decisions taken ----
-     These used to be invisible: nothing in the brief said a decision had been
-     reached, and the summary that once sat at the top counted "ours to decide"
-     from status, so it read 0 on the day two decisions were actually made. */
-  const decidedBlock = decided.map(c => `<tr>
-      <td valign="top" width="118" style="padding:8px 10px 8px 0;border-bottom:1px solid ${C.line};
-          font-size:12.5px;font-weight:700;color:${C.ink};">${esc(c.company)}</td>
-      <td valign="top" style="padding:8px 0;border-bottom:1px solid ${C.line};">
-        <div style="font-size:12.5px;color:${C.ink};line-height:1.45;">${esc(c.decision)}</div>
-        ${c.decision_next ? `<div style="font-size:11px;color:${C.faint};margin-top:3px;">${
-          esc(c.decision_next)}</div>` : ''}
-      </td>
-      <td valign="top" align="right" width="118" style="padding:8px 0 8px 10px;
-          border-bottom:1px solid ${C.line};white-space:nowrap;">${
-        pill(AWAIT[c.dependency] || 'agreed', C.ok, C.okBg)}</td>
-    </tr>`).join('');
-
   const html =
 `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -472,7 +442,7 @@ export function buildBrief({ companies, history, today }) {
     <div style="font-size:13.5px;color:#fff;opacity:.9;margin-top:6px;font-weight:600;">
       ${esc(longDate(now))}</div>
     <div style="font-size:11.5px;font-family:${MONO};color:${C.gold};opacity:.85;margin-top:9px;">
-      Prepared by Rafik for internal review${lastEdited ? ` &middot; tracker last edited ${esc(lastEdited)}` : ''}</div>
+      Prepared by Rafik${lastEdited ? ` &middot; tracker last edited ${esc(lastEdited)}` : ''}</div>
   </td></tr>
 
   <tr><td style="padding:24px 28px 6px;">
@@ -481,10 +451,6 @@ export function buildBrief({ companies, history, today }) {
 
   ${section('Your morning', 'What each of us is holding, and what to do about it')}
   ${DESKS.map(deskBlock).join('')}
-
-  ${decided.length ? `${section('Decided, awaiting sign-off',
-      'Settled on our side — what each one is waiting on')}
-  <tr><td style="padding:0 28px 6px;"><table width="100%" cellpadding="0" cellspacing="0">${decidedBlock}</table></td></tr>` : ''}
 
   <tr><td style="padding:26px 28px 0;">
     <div style="border-top:2px solid ${C.line};padding-top:14px;font-size:10px;
@@ -515,14 +481,11 @@ export function buildBrief({ companies, history, today }) {
 
   const subject = `Portfolio Brief — ${dmy(todayStr)} · `
     + `${totalActions} action${totalActions === 1 ? '' : 's'}`
-    + (movedReal.length ? ` · ${movedReal.length} moved` : '')
-    + (decided.length ? ` · ${decided.length} decided` : '');
+    + (movedReal.length ? ` · ${movedReal.length} moved` : '');
 
   /* The same content the HTML shows, as plain data, so the PDF is laid out
-     from the brief rather than converted from its markup. */
-  /* Only what the PDF renders. It used to carry the maturity label, the status
-     and the due date as well, all of which came off the desk rows with the
-     Standing section. */
+     from the brief rather than converted from its markup. Only what the PDF
+     renders: the maturity label, status and due date all came off the rows. */
   const forCompany = c => ({
     company: c.company,
     actions: toLines(c.next_action),
@@ -553,10 +516,6 @@ export function buildBrief({ companies, history, today }) {
       ? movedDone.map(h => h.company).filter((v, i, a) => a.indexOf(v) === i).join(', ')
         + '  -  ' + movedDone.length + ' action' + (movedDone.length === 1 ? '' : 's')
       : '',
-    decided: decided.map(c => ({
-      company: c.company, decision: c.decision, next: c.decision_next || '',
-      pill: AWAIT[c.dependency] || 'agreed',
-    })),
   };
 
   /* The email carries the PDF and this, not the HTML: enough for the phone
@@ -746,8 +705,7 @@ async function isSignedIn(token, supabaseUrl, apikey) {
    else's API is down. It carries the same content in the same order as the
    email, in the same dark identity. */
 export function briefPdf({ now, lastEdited, greeting,
-  ticked, decided,
-                           desks, moved }) {
+  ticked, desks, moved }) {
   const P = {
     page: '#100C0D', card: '#1A1416', line: '#33292B', soft: '#241D1F',
     ink: '#EDE5E6', mid: '#B0A2A4', faint: '#867779',
@@ -790,7 +748,7 @@ export function briefPdf({ now, lastEdited, greeting,
   d.y += 29;
   d.textAt(longDate(now), d.margin, d.y, { size: 11, bold: true, colour: '#FFFFFF' });
   d.y += 15;
-  d.textAt('Prepared by Rafik for internal review'
+  d.textAt('Prepared by Rafik'
            + (lastEdited ? '  -  tracker last edited ' + lastEdited : ''),
            d.margin, d.y, { size: 8, colour: P.gold });
   d.y = 142;
@@ -813,9 +771,8 @@ export function briefPdf({ now, lastEdited, greeting,
     d.y += 6;
   };
 
-  /* Same trim as the email: the lateness badge repeated a fact that is in the
-     Standing annex, and the status chip repeats the desk you are reading. The
-     context line under the actions went with them. */
+  /* Same trim as the email: no lateness badge, no status chip (it repeated the
+     desk you are reading) and no context line under the actions. */
   const gridRow = (c, i) => d.keepTogether(() => {
     const top = d.y;
     const actW = COL.right - COL.act - 104;
@@ -868,20 +825,6 @@ export function briefPdf({ now, lastEdited, greeting,
              { size: 9, colour: P.mid, indent: COL.act, width: d.innerWidth, after: 4 });
     }));
   });
-
-  /* --------------------------------------------------- decisions ---- */
-  if ((decided || []).length) {
-    section('Decided, awaiting sign-off',
-      'Settled on our side. What each one is now waiting on.');
-    decided.forEach(x => d.keepTogether(() => {
-      d.rule(P.line, { after: 8 });
-      d.textAt(x.company, d.margin, d.y, { size: 9.5, bold: true, colour: P.ink });
-      d.textRight(x.pill, R, d.y, { size: 7.5, bold: true, colour: P.gold });
-      d.y += 13;
-      d.para(x.decision, { size: 9.5, colour: P.ink, after: 3 });
-      if (x.next) d.para(x.next, { size: 8.5, colour: P.faint, after: 4 });
-    }));
-  }
 
   /* ---------------------------------------------------------- annex ---- */
   /* The record, not the work. It sits behind the desks because nothing in it

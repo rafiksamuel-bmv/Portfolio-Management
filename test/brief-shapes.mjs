@@ -16,7 +16,8 @@ import { buildBrief, briefPdf, fallbackBrief } from '../api/daily-brief.js';
 const TODAY = new Date(Date.UTC(2026, 8, 7));
 
 /* A small tracker that exercises each routing path: one company per desk, one
-   decided, one with no dependency at all. */
+   carrying the retired decision fields (which the brief must now ignore), one
+   with no dependency at all. */
 const COMPANIES = [
   { id: 'c1', num: 1, company: 'Alpha', priority: 'Immediate', owner: 'Mina',
     due: '1 Sep 2026', maturity_date: '2025-06-14', ccy: 'USD', invested: 125000,
@@ -148,6 +149,21 @@ function behaviour() {
   check('chase line headed by its own channel',
         find('MisrOne') === 'With Misr Capital' && find('BoardOne') === 'With ISV or the Board',
         `MisrOne -> ${find('MisrOne')} | BoardOne -> ${find('BoardOne')}`);
+
+  /* The decision fields are retired: a stored decision must not surface. */
+  const withDecision = [{ ...COMPANIES[3], decision: 'Decided to proceed.', decision_next: 'Next: board.' }];
+  const bd = buildBrief({ companies: withDecision, history: [], today: TODAY });
+  check('a stored decision no longer prints',
+        !/Decided to proceed|DECIDED|Decided, awaiting/.test(bd.html) && !('decided' in bd.pdfData),
+        '');
+
+  /* The team asked that neither word appear on anything we produce. The masthead
+     used to say "Prepared by Rafik for internal review". */
+  const plain = buildBrief({ companies: COMPANIES, history: HISTORY, today: TODAY });
+  const pdfText = Buffer.from(briefPdf(plain.pdfData)).toString('latin1');
+  const said = [plain.html, plain.text, plain.subject, pdfText]
+    .map(s => (s.match(/\binternal\b|confidential/i) || [''])[0]).filter(Boolean);
+  check('never says "internal" or "confidential"', !said.length, said.join(' '));
 
   return out;
 }
