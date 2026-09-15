@@ -36,17 +36,63 @@ Production: https://portfolio-management-five-cyan.vercel.app
 | `launch.sh` | Clears git locks and pushes |
 | `middleware.ts` | Soft link-share gate (see Architecture) |
 | `api/daily-brief.js` | Daily portfolio brief: reads Supabase, emails it. Cron'd by `vercel.json` |
-| `lib/pdf.js` | Minimal PDF writer for the brief's attachment. Outside `api/` on purpose: anything in `api/` becomes an endpoint |
+| `lib/deck.js` | The status deck, shared by the Export deck button and the morning email. Also the ZIP writer and the next-action owner rules the app uses |
+| `lib/pdf.js` | Minimal PDF writer for the fallback brief. Outside `api/` on purpose: anything in `api/` becomes an endpoint |
 | `vercel.json` | Cron schedule for the brief (04:00 UTC = 7am Cairo in summer) |
 | `404.html` | Shown to anyone the middleware gate blocks |
 | `package.json`, `package-lock.json` | Only exist for `middleware.ts`'s `@vercel/functions` dependency |
 
 ## Daily brief
 
-`api/daily-brief.js` builds the morning brief and emails it. It is dependency
+`api/daily-brief.js` builds the morning email and sends it. It is dependency
 free on purpose: Supabase and Resend are both plain REST, so nothing is
-installed for it. `buildBrief()` is exported separately from the handler so the
-output can be rendered and checked without sending anything.
+installed for it. `buildDeck()`, `buildBrief()` and `composeMail()` are
+exported separately from the handler so the output can be built and checked
+without sending anything.
+
+### The email is the status deck
+
+Since 15 September, at the user's request, the 7am email carries **the status
+deck as a `.pptx`** and nothing else, to `BRIEF_TO` (default
+rafiksamuel@aucegypt.edu). The PDF brief described further down is kept only
+as its fallback.
+
+- **One deck, two callers.** The deck lives in `lib/deck.js`, a plain ES5
+  script with no module syntax that sets `globalThis.BMVDeck`. `index.html`
+  loads it with a script tag before the app script; `api/daily-brief.js`
+  imports it for the side effect. So the deck someone exports and the deck that
+  arrives at 7am are built by the same code and cannot drift. Do not copy deck
+  code back into the page. The app also takes `actionLines`, `parseAction`,
+  `PEOPLE`, `PRI_ORDER`, `DK_DEPS` and the ZIP writer from it, so the rule for
+  who owns an action line has one copy on the page.
+- **The emailed deck is the Export deck plus a WHAT MOVED slide at the end,**
+  and its cover is dated by day rather than by month. The Export button leaves
+  the slide out, so the weekly deck stays a cover and two tables. The slide is
+  there because LATEST STATUS is typed by hand: on a morning nobody edited the
+  tracker, the history log is the only part that changes. It reads
+  `whatMoved()`, which the brief's annex also reads — three days back, falling
+  back to the five newest entries, tick-box entries split out into the "Also
+  ticked off" note. **It has no source column**: the source said "Email" or
+  "Internal update", was not what the slide is read for, and took the width the
+  entry needs. No history at all means no slide.
+- `buildDeck()` maps the Supabase rows' snake_case to the camelCase the deck
+  reads, for the handful of fields it prints. Add a deck field there too.
+- **`composeMail()` steps down rather than going quiet**: the deck; if it will
+  not build, the PDF brief with a line saying why; if the PDF will not build,
+  the brief's HTML; if the brief will not build, `fallbackBrief()`'s raw
+  actions. The response's `attached` field names which went, and the app's
+  Send now toast warns when it was not the deck.
+- `?deck=1` returns the deck without sending. The dashboard's **Download**
+  button uses it rather than building locally, so it is exactly what the email
+  carries, WHAT MOVED slide included.
+- `npm test` builds the deck, as well as the brief, for every tracker shape,
+  checks the column mapping and the fallback chain, and runs the handler end to
+  end with Supabase and Resend stood in for.
+
+### The fallback brief
+
+Everything below describes the brief, which is now sent only when the deck
+cannot be built, and is still served by `?preview=1` and `?pdf=1`.
 
 - **Nothing sits between the greeting and the first desk.** Successive versions
   put a row of stat tiles there, then a counts paragraph, then a one-line
@@ -138,8 +184,8 @@ output can be rendered and checked without sending anything.
   that is only a name, every field null. Editing the tracker must never be able
   to stop the morning brief, and that is the only thing standing behind it.
   Run it after touching desk routing, the grid, or anything that reads a
-  company field, or the deck. It runs `test/deck.cjs` too, which lifts the
-  deck's code out of `index.html` and checks the action map's columns, the
+  company field, or the deck. It runs `test/deck.cjs` too, which loads
+  `lib/deck.js` the way the page does and checks the action map's columns, the
   10pt type and the pagination. It is not decoration: reintroduce the
   `deskItem` bug and five cases fail. It also checks **behaviour, not just that it built** — every
   shape below built fine on 8 September and the brief was still wrong.
@@ -154,17 +200,16 @@ output can be rendered and checked without sending anything.
   theme), with `color-scheme: dark`, `bgcolor` attributes, and `[data-ogsc]`
   overrides to stop Outlook and Gmail inverting the ground back to white under
   light text. Do not reintroduce light values here.
-- **The email is the PDF.** The body is the greeting and one line saying the
-  brief is attached, and the brief itself is the attachment. There is one artefact to read, forward
-  and file rather than the same content twice. The HTML is still built and
-  still served by `?preview=1`, and it is the **fallback if the PDF fails to
-  build**: a brief in the wrong format beats no brief.
-- **Every send carries a PDF**, built by `briefPdf()` on top of `lib/pdf.js`.
-  Written by hand for the same reason as the Excel export: no service, no key,
-  and the morning job cannot fail because someone else's API is down. It is laid
-  out from `brief.pdfData` rather than converted from the HTML, so the two carry
-  the same content without the PDF depending on the markup. If it throws, the
-  email still goes and the response says `pdf: failed`.
+- **When the brief is sent, it is sent as the PDF.** The body is the line
+  saying why the deck did not go, the greeting, and one line saying the brief
+  is attached. The HTML is still built and still served by `?preview=1`, and
+  it goes in the body only if the PDF fails to build: a brief in the wrong
+  format beats no brief.
+- **The PDF is built by `briefPdf()`** on top of `lib/pdf.js`. Written by hand
+  for the same reason as the Excel export: no service, no key, and the morning
+  job cannot fail because someone else's API is down. It is laid out from
+  `brief.pdfData` rather than converted from the HTML, so the two carry the
+  same content without the PDF depending on the markup.
 - Desks render as a **grid** — company, then what to do — with zebra rows, not
   as prose blocks. The per-company timelines were removed with it: between them
   they made the brief too long to read at 7am.
@@ -194,7 +239,7 @@ output can be rendered and checked without sending anything.
 - `?preview=1` returns the HTML without sending.
 - **Three ways to authorise it**: the cron's bearer `CRON_SECRET`, `?key=` for a
   browser preview, or a **signed-in person's Supabase session token**, which is
-  how the Send now / Preview buttons on the Dashboard work. The app is a public
+  how the Send now / Download buttons on the Dashboard work. The app is a public
   static page and cannot hold `CRON_SECRET`, so it presents the session token it
   already has and `isSignedIn()` verifies it against `/auth/v1/user` rather than
   decoding the JWT locally, so an expired or revoked token is refused. That path
@@ -331,9 +376,11 @@ colour only inside a media query. The two logos are base64 data URIs.
   indexes into `XL_TRACKER_COLS`.
 - Dates are written as Excel serials (`xlDate`, days since 1899-12-30).
 - **The status deck (`exportDeck`) is the second export**, the weekly PowerPoint
-  for the Chief Venture Officer, generated rather than rebuilt by hand. A
-  `.pptx` is a ZIP of XML parts exactly as an `.xlsx` is, so `zipStore()` is
-  shared — it takes an optional mime type for the two. Every shape is
+  for the Chief Venture Officer, generated rather than rebuilt by hand, and
+  since 15 September also the morning email (see Daily brief). Its code is in
+  `lib/deck.js`, not `index.html`. A `.pptx` is a ZIP of XML parts exactly as
+  an `.xlsx` is, so the ZIP writer (`BMVDeck.zip`, returning bytes) is shared:
+  the page's `zipStore()` wraps it in a Blob for the Excel file. Every shape is
   absolutely positioned, which is what PowerPoint stores natively, so there is
   no layout engine here: `dkLines()` only estimates how tall a table row must
   be and PowerPoint does the real wrapping inside it. Geometry is in EMU,
@@ -363,7 +410,9 @@ colour only inside a media query. The two logos are base64 data URIs.
   - Row heights come from `dkLines()`, which estimates wrapping at 1.08× the
     point size, deliberately generous: a row slightly too tall looks loose, a
     row too short overlaps the next one.
-  - **No images.** `zipStore()` encodes each part as UTF-8 text, so a PNG
+  - A table with no rows says so ("No next actions are recorded.") rather
+    than printing a header over nothing.
+  - **No images.** The ZIP writer encodes each part as UTF-8 text, so a PNG
     cannot pass through it, and carrying the artwork would put base64 in the
     page for every reader on every load. The brand is drawn instead.
   - Rows are priority-then-alphabetical, so a generated deck does not
