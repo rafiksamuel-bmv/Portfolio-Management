@@ -1,13 +1,18 @@
 import { Doc, wrap as wrapLines } from '../lib/pdf.js';
+/* A plain script rather than a module: it sets globalThis.BMVDeck, the same
+   deck the app's Export button builds. */
+import '../lib/deck.js';
 
 /* Daily portfolio brief.
  *
  * Runs on a Vercel cron (see vercel.json), reads the tracker straight from
- * Supabase and emails the brief. Deliberately dependency-free: Supabase and
- * Resend are both plain REST, so this needs nothing installed.
+ * Supabase and emails the status deck, as a .pptx. If the deck cannot be
+ * built, the older PDF brief goes instead. Deliberately dependency-free:
+ * Supabase and Resend are both plain REST, so this needs nothing installed.
  *
- * GET /api/daily-brief?preview=1   renders the HTML without sending.
- * GET /api/daily-brief?pdf=1       returns the PDF without sending.
+ * GET /api/daily-brief?deck=1      returns the deck without sending.
+ * GET /api/daily-brief?preview=1   renders the fallback brief's HTML.
+ * GET /api/daily-brief?pdf=1       returns the fallback brief's PDF.
  *
  * Environment (set in Vercel, never in the repo):
  *   SUPABASE_URL                the project URL
@@ -228,15 +233,83 @@ function pill(text, fg, bg) {
 }
 
 
+/* ============================ what moved ============================ */
+/* A 24-hour window goes blank whenever yesterday was quiet, which is exactly
+   when you still want to see where things stand. Look back three days, and
+   fall back to the most recent entries rather than showing nothing. Tick-box
+   entries are split out: a task leaving a list is not the position changing.
+   The deck's WHAT MOVED slide and the brief's annex both read this. */
+const LOOKBACK_DAYS = 3;
+export function whatMoved(history, now) {
+  const all = (Array.isArray(history) ? history : []).filter(Boolean);
+  const since = ymd(new Date(now - LOOKBACK_DAYS * MS_DAY));
+  const sortByDate = (a, b) =>
+    String(b.entry_date).localeCompare(String(a.entry_date)) ||
+    String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  const recent = all.filter(h => h.entry_date >= since).sort(sortByDate);
+  const usingFallback = recent.length === 0;
+  const moved = usingFallback ? all.slice().sort(sortByDate).slice(0, 5) : recent;
+  return {
+    moved, usingFallback,
+    movedReal: moved.filter(h => h.source !== DONE_SRC),
+    movedDone: moved.filter(h => h.source === DONE_SRC),
+  };
+}
+
+/* ============================ the deck ============================ */
+/* The morning email is the status deck: the same lib/deck.js the Export
+   button uses, plus a WHAT MOVED slide from the history log. The tracker rows
+   arrive snake_case from Supabase and the deck reads the app's camelCase, so
+   the handful of fields it prints are mapped here. */
+export function buildDeck({ companies, history, today }) {
+  const now = today || new Date();
+  const D = globalThis.BMVDeck;
+  if (!D) throw new Error('lib/deck.js did not load');
+  const rows = (Array.isArray(companies) ? companies : []).filter(Boolean).map(c => ({
+    company: c.company, priority: c.priority, owner: c.owner,
+    issueTitle: c.issue_title, latestStatus: c.latest_status,
+    closure: c.closure, nextAction: c.next_action,
+  }));
+
+  const { movedReal, movedDone, usingFallback } = whatMoved(history, now);
+  const year = now.getUTCFullYear();
+  const shortDate = s => {
+    const d = parseDate(s);
+    if (!d) return '';
+    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
+      + (d.getUTCFullYear() === year ? '' : ` ${d.getUTCFullYear()}`);
+  };
+  const ticked = movedDone.map(h => h.company).filter((v, i, a) => v && a.indexOf(v) === i);
+  const moved = {
+    sub: usingFallback
+      ? 'Nothing logged in the last three days, so the latest entries on file'
+      : `${movedReal.length} entr${movedReal.length === 1 ? 'y' : 'ies'} in the last three days`,
+    rows: movedReal.map(h => ({
+      company: h.company || 'General', date: shortDate(h.entry_date), entry: h.entry,
+    })),
+    note: movedDone.length
+      ? `Also ticked off: ${ticked.join(', ')}  |  ${movedDone.length} action${movedDone.length === 1 ? '' : 's'}`
+      : '',
+  };
+
+  const bytes = D.build(rows, { date: ymd(now), byDay: true, moved });
+  return {
+    bytes,
+    mime: D.MIME,
+    filename: `portfolio-status-${ymd(now)}.pptx`,
+    subject: `Portfolio Brief — ${dmy(ymd(now))}`
+      + (movedReal.length && !usingFallback ? ` · ${movedReal.length} moved` : ''),
+    text: [greeting(now), "Today's status deck is attached."].join('\n\n'),
+  };
+}
+
 /* ============================ the brief ============================ */
+/* No longer what the email carries. It is sent only if the deck fails to
+   build, and still served by ?preview=1 and ?pdf=1. */
 export function buildBrief({ companies, history, today }) {
   const now = today || new Date();
   const todayStr = ymd(now);
-  /* A 24-hour window goes blank whenever yesterday was quiet, which is exactly
-     when you still want to see where things stand. Look back three days, and
-     fall back to the most recent entries rather than showing nothing. */
-  const LOOKBACK_DAYS = 3;
-  const since = ymd(new Date(now - LOOKBACK_DAYS * MS_DAY));
+  const { moved, movedReal, movedDone, usingFallback } = whatMoved(history, now);
 
   const byNum = companies.slice().sort((a, b) => (a.num || 0) - (b.num || 0));
   /* Newest edit across the tracker, which is what the header now carries
@@ -248,12 +321,6 @@ export function buildBrief({ companies, history, today }) {
   const overdue = byNum.filter(c => overdueDays(now, c) !== null)
                        .sort((a, b) => overdueDays(now, b) - overdueDays(now, a));
   const immediate = byNum.filter(c => c.priority === 'Immediate');
-  const sortByDate = (a, b) =>
-    String(b.entry_date).localeCompare(String(a.entry_date)) ||
-    String(b.created_at || '').localeCompare(String(a.created_at || ''));
-  const recent = history.filter(h => h.entry_date >= since).sort(sortByDate);
-  const usingFallback = recent.length === 0;
-  const moved = usingFallback ? history.slice().sort(sortByDate).slice(0, 5) : recent;
 
   /* ---- the opening ----
      This used to be counts: 12 companies, 9 past maturity, 7 with counsel. All
@@ -264,9 +331,6 @@ export function buildBrief({ companies, history, today }) {
   const counts = {};
   ['Pending legal', 'Pending company', 'Pending our action'].forEach(k => {
     counts[k] = byNum.filter(c => c.status === k).length; });
-  const movedReal = moved.filter(h => h.source !== DONE_SRC);
-  const movedDone = moved.filter(h => h.source === DONE_SRC);
-
   /* Nothing sits above the desks. Counting the work is not the same as saying
      what it is. totalActions survives only for the subject line, where a
      number does earn its place. */
@@ -616,73 +680,100 @@ export default async function handler(req, res) {
     return res.status(502).send(`Could not read the tracker: ${err.message}`);
   }
 
-  let brief;
-  try {
-    brief = buildBrief({ ...data, today: now0 });
-  } catch (err) {
-    /* ?preview and ?pdf are a person looking at it, so show them the error.
-       A scheduled send must not go quiet: fall back to the raw actions so the
-       brief still arrives and the failure is visible in it. */
-    if (preview || url.searchParams.get('pdf') === '1') {
-      return res.status(502).send(`Could not build the brief: ${err.message}`);
+  /* ?deck=1 is a person looking at it (the Preview button), so a failure is
+     shown to them rather than papered over. */
+  if (url.searchParams.get('deck') === '1') {
+    let deck;
+    try {
+      deck = buildDeck({ ...data, today: now0 });
+    } catch (err) {
+      return res.status(502).send(`Could not build the deck: ${err.message}`);
     }
-    brief = fallbackBrief(data && data.companies, err, now0);
+    res.setHeader('Content-Type', deck.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${deck.filename}"`);
+    return res.status(200).send(Buffer.from(deck.bytes));
   }
 
-  if (url.searchParams.get('pdf') === '1') {
-    const buf = briefPdf(brief.pdfData);
+  if (preview || url.searchParams.get('pdf') === '1') {
+    let brief;
+    try {
+      brief = buildBrief({ ...data, today: now0 });
+    } catch (err) {
+      return res.status(502).send(`Could not build the brief: ${err.message}`);
+    }
+    if (preview) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(200).send(brief.html);
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition',
       `inline; filename="portfolio-brief-${ymd(now0)}.pdf"`);
-    return res.status(200).send(buf);
-  }
-  if (preview) {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(brief.html);
+    return res.status(200).send(briefPdf(brief.pdfData));
   }
 
   if (!RESEND_API_KEY) return res.status(500).send('RESEND_API_KEY is not set.');
 
-  /* The PDF is built here, so it needs no key and cannot fail because an
-     external service is down. If it throws anyway, the email still goes. */
-  let attachments;
-  let pdfNote;
-  if (brief.reduced) {
-    pdfNote = 'skipped: reduced brief';          /* there is nothing to lay out */
-  } else {
-    try {
-      const bytes = briefPdf(brief.pdfData);
-      attachments = [{
-        filename: `portfolio-brief-${ymd(new Date())}.pdf`,
-        content: bytes.toString('base64'),
-        content_type: 'application/pdf',
-      }];
-      pdfNote = `attached (${bytes.length} bytes)`;
-    } catch (err) {
-      attachments = undefined;
-      pdfNote = `failed: ${err.message}`;
-    }
-  }
-
+  const mail = composeMail(data, now0);
   const send = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: BRIEF_FROM || 'BMV Portfolio <onboarding@resend.dev>',
       to: [BRIEF_TO || DEFAULT_TO],
-      subject: brief.subject,
-      /* PDF only. The HTML is the fallback for the case where the PDF failed
-         to build -- a brief in the wrong format beats no brief at all. */
-      ...(attachments ? { text: brief.text, attachments }
-                      : { text: brief.text, ...(brief.html ? { html: brief.html } : {}) }),
+      subject: mail.subject,
+      text: mail.text,
+      ...(mail.html ? { html: mail.html } : {}),
+      ...(mail.attachments ? { attachments: mail.attachments } : {}),
     }),
   });
   if (!send.ok) return res.status(502).send(`Resend ${send.status}: ${await send.text()}`);
 
   return res.status(200).json({
-    sent: true, to: BRIEF_TO || DEFAULT_TO, subject: brief.subject, pdf: pdfNote,
-    counts: brief.counts, overdue: brief.overdue, moved: brief.moved,
+    sent: true, to: BRIEF_TO || DEFAULT_TO, subject: mail.subject, attached: mail.note,
   });
+}
+
+/* What the morning email carries, most wanted first, so that editing the
+   tracker can never cost the morning its email:
+     1. the status deck, as a .pptx
+     2. if the deck will not build, the PDF brief, saying why
+     3. if the PDF will not build, the brief's HTML in the body
+     4. if the brief will not build either, the raw next actions as text
+   Every step down names the failure in the email itself. */
+export function composeMail(data, now) {
+  let deckErr;
+  try {
+    const deck = buildDeck({ ...data, today: now });
+    return {
+      subject: deck.subject, text: deck.text,
+      attachments: [{ filename: deck.filename, content: Buffer.from(deck.bytes).toString('base64'),
+                      content_type: deck.mime }],
+      note: `deck (${deck.bytes.length} bytes)`,
+    };
+  } catch (err) { deckErr = err; }
+
+  const why = `The status deck could not be built this morning (${deckErr.message}), `
+            + 'so this is the brief instead.';
+  let brief;
+  try {
+    brief = buildBrief({ ...data, today: now });
+  } catch (err) {
+    const f = fallbackBrief(data && data.companies, err, now);
+    return { subject: f.subject, text: why + '\n\n' + f.text,
+             note: `reduced: deck failed (${deckErr.message}), brief failed (${err.message})` };
+  }
+  try {
+    const bytes = briefPdf(brief.pdfData);
+    return {
+      subject: brief.subject, text: why + '\n\n' + brief.text,
+      attachments: [{ filename: `portfolio-brief-${ymd(now)}.pdf`,
+                      content: bytes.toString('base64'), content_type: 'application/pdf' }],
+      note: `brief pdf: deck failed (${deckErr.message})`,
+    };
+  } catch (err) {
+    return { subject: brief.subject, text: why + '\n\n' + brief.text, html: brief.html,
+             note: `brief html: deck failed (${deckErr.message}), pdf failed (${err.message})` };
+  }
 }
 
 /* Is this a real, current Supabase session? Asking Supabase rather than

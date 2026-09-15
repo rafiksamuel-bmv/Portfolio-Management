@@ -3,41 +3,28 @@
  *
  *   node test/deck.cjs
  *
- * The deck lives in index.html, a browser page, so the parts under test are
- * lifted out of it verbatim and run here. It checks the rules the deck shares
- * with the brief -- ownership by tag, falling back to the company's owner, and
- * whatever bullet was typed -- plus the deck's own shape: a cover, the detailed
- * status, then the action map, each on as many slides as its rows need, at a
- * fixed 10pt, and no company in the action map that nobody has an action on.
+ * The deck lives in lib/deck.js, shared by the Export button and the morning
+ * email. This checks the rules the deck shares with the brief -- ownership by
+ * tag, falling back to the company's owner, and whatever bullet was typed --
+ * plus the deck's own shape: a cover, the detailed status, then the action
+ * map, each on as many slides as its rows need, at a fixed 10pt, no company in
+ * the action map that nobody has an action on, and the email's WHAT MOVED
+ * slide only when it is asked for. Last, that index.html actually uses it.
  */
 const fs = require('fs');
 const path = require('path');
 
+/* lib/deck.js is a plain script that hangs BMVDeck on the global, which is
+   how both the page and the email load it. Load it the same way here. */
+new Function(fs.readFileSync(path.join(__dirname, '..', 'lib', 'deck.js'), 'utf8'))();
+const D = globalThis.BMVDeck;
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const sc = html.match(/<script id="app">([\s\S]*?)<\/script>/)[1];
-const cut = (a, b) => {
-  const i = sc.indexOf(a), j = sc.indexOf(b);
-  if (i < 0 || j < 0 || j < i) throw new Error(`could not lift ${a} .. ${b} out of index.html`);
-  return sc.slice(i, j);
-};
-const harness = `
-${sc.match(/function esc\(s\)\{[\s\S]*?\n  \}/)[0]}
-${sc.match(/function today\(\)\{.*?\}/)[0]}
-${cut('var PRI_ORDER=', 'function visible()')}
-${cut('function actionLines(c)', 'function doneBlock')}
-var state = STATE, visible = function(){ return STATE.companies; };
-function usdEq(){ return 0; } function parseLoose(){ return null; }
-${cut('/* ---------- excel export', '/* ---------- shell ---------- */')}
-return { deckSlides: deckSlides, dkActionsByPerson: dkActionsByPerson, dkPages: dkPages,
-         DK_BOTTOM: DK_BOTTOM };
-`;
-global.TextEncoder = require('util').TextEncoder;
 
 const co = (company, owner, nextAction, extra) => Object.assign(
   { company, owner, nextAction, priority: 'Immediate', issueTitle: 'A title.',
     latestStatus: 'Where it stands.', closure: 'The outcome.' }, extra || {});
-const LISTS = { priority: ['Immediate', 'Near-Term', 'Postponed', 'No Action'] };
-const load = companies => new Function('STATE', harness)({ companies, lists: LISTS });
+const load = companies => ({ deckSlides: opts => D.slides(companies, opts) });
+const dkActionsByPerson = D.actionsByPerson, dkPages = D.pages, DK_BOTTOM = D.BOTTOM;
 
 const COMPANIES = [
   co('Tagged',   'Rafik', '• Reem: decide it\n• Mina, Rafik: draft it'),
@@ -49,7 +36,7 @@ const COMPANIES = [
   co('Quiet',    'Rafik', ''),
 ];
 
-const { deckSlides, dkActionsByPerson, dkPages, DK_BOTTOM } = load(COMPANIES);
+const { deckSlides } = load(COMPANIES);
 
 let failed = 0;
 const check = (name, ok, detail) => {
@@ -59,7 +46,7 @@ const check = (name, ok, detail) => {
 const cols = c => dkActionsByPerson(COMPANIES.find(x => x.company === c));
 
 /* slide XML helpers */
-const title = s => (s.match(/<a:t>(DETAILED STATUS|ACTION MAP)<\/a:t>/) || [, 'cover'])[1];
+const title = s => (s.match(/<a:t>(DETAILED STATUS|ACTION MAP|WHAT MOVED)<\/a:t>/) || [, 'cover'])[1];
 const texts = s => [...s.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => m[1]);
 const sizeOf = (s, text) => {
   const m = s.match(new RegExp('sz="(\\d+)"[^>]*>(?:(?!</a:rPr>).)*</a:rPr><a:t>' +
@@ -143,20 +130,69 @@ check('the long tracker stays at 10pt', big.slice(1).every(s => {
   return !sz.some(v => v < 800) && sz.includes(1000);
 }));
 
+console.log('\n  the morning email\'s extras');
+const MOVED = { sub: '2 entries in the last three days',
+  rows: [{ company: 'Tagged', date: '14 Sep', entry: '• First line\n* second line', source: 'Email' },
+         { company: 'Obtain', date: '13 Sep', entry: 'Obtain moved', source: 'Call' }],
+  note: 'Also ticked off: Star  |  1 action' };
+const withMoved = deckSlides({ date: '2026-09-15', byDay: true, moved: MOVED });
+const last = withMoved[withMoved.length - 1];
+check('the email adds WHAT MOVED, last', title(last) === 'WHAT MOVED' &&
+  withMoved.map(title).join() === 'cover,DETAILED STATUS,ACTION MAP,WHAT MOVED',
+  withMoved.map(title).join(' / '));
+check('the Export deck has no WHAT MOVED', !slides.some(s => title(s) === 'WHAT MOVED'));
+check('a history entry keeps its lines, bullets off',
+  texts(last).includes('First line') && texts(last).includes('second line') &&
+  !texts(last).some(x => /^[•*]/.test(x)));
+check('ticked-off actions are the note', last.includes('Also ticked off: Star'));
+check('its footer carries on the numbering', /Value Creation\s+4</.test(last));
+check('the email cover is dated by day', texts(withMoved[0]).some(x => x.startsWith('15 September 2026')),
+  texts(withMoved[0]).join(' / '));
+check('the Export cover is dated by month',
+  texts(deckSlides({ date: '2026-09-15' })[0]).some(x => x.startsWith('September 2026')));
+const onlyTicked = deckSlides({ moved: { sub: 's', rows: [], note: 'Also ticked off: A' } });
+check('only tick-box history still gets a slide, and says so',
+  title(onlyTicked[onlyTicked.length - 1]) === 'WHAT MOVED' &&
+  onlyTicked[onlyTicked.length - 1].includes('Nothing logged beyond'));
+check('no history at all, no WHAT MOVED slide',
+  !deckSlides({ moved: { sub: 's', rows: [], note: '' } }).some(s => title(s) === 'WHAT MOVED'));
+const bare = load([co('A', 'Rafik', '')]).deckSlides();
+check('an empty action map says so', bare[2].includes('No next actions are recorded.'));
+const bytes = D.build(COMPANIES, { moved: MOVED });
+const asText = Buffer.from(bytes).toString('latin1');
+check('build() gives a .pptx: a ZIP with every slide in it',
+  asText.startsWith('PK') && (asText.match(/ppt\/slides\/slide\d+\.xml(?!\.rels)/g) || []).length >= 4 * 2,
+  `${bytes.length} bytes`);
+
 console.log('\n  shapes it must survive');
 for (const [label, cos] of [
   ['no companies',           []],
   ['every action cleared',   COMPANIES.map(c => ({ ...c, nextAction: '' }))],
   ['every field empty',      COMPANIES.map(c => ({ company: c.company }))],
+  ['every field null',       COMPANIES.map(c => Object.fromEntries(Object.keys(c).map(k => [k, null])))],
+  ['a null company',         [null, COMPANIES[0]]],
   ['one enormous action',    [co('Huge', 'Rafik', '• ' + words(900))]],
 ]) {
   let note = '';
   try {
-    const s = load(cos).deckSlides();
+    const s = load(cos).deckSlides({ moved: { sub: 's', rows: [null, { entry: null }], note: '' } });
     if (s.length < 3) note = `${s.length} slides`;
+    D.build(cos, {});
   } catch (err) { note = 'THREW: ' + err.message; }
   check(label, !note, note);
 }
+
+console.log('\n  index.html uses it');
+const app = html.match(/<script id="app">([\s\S]*?)<\/script>/);
+check('lib/deck.js loads before the app script',
+  html.indexOf('<script src="lib/deck.js"></script>') > -1 &&
+  html.indexOf('<script src="lib/deck.js"></script>') < html.indexOf('<script id="app">'));
+check('the app keeps no second copy of the deck',
+  !/function (dkTables|deckSlides|buildPptx|parseAction|crc32)\b|var (BULLET|CRC_T|DKC)\b/.test(app[1]));
+check('Export builds from BMVDeck', /BMVDeck\.build\(visible\(\)/.test(app[1]));
+let parses = true;
+try { new Function(app[1]); } catch (e) { parses = e.message; }
+check('the app script still parses', parses === true, parses === true ? '' : parses);
 
 console.log(failed ? `\n${failed} FAILED` : '\ndeck holds');
 process.exit(failed ? 1 : 0);

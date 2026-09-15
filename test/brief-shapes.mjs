@@ -11,7 +11,7 @@
  * in a few clicks. Run this after touching desk routing, the grid, or anything
  * that reads a company field. It exits non-zero on the first failure.
  */
-import { buildBrief, briefPdf, fallbackBrief } from '../api/daily-brief.js';
+import handler, { buildBrief, briefPdf, fallbackBrief, buildDeck, composeMail } from '../api/daily-brief.js';
 
 const TODAY = new Date(Date.UTC(2026, 8, 7));
 
@@ -172,6 +172,10 @@ let failed = 0;
 for (const [name, [companies, history]] of Object.entries(CASES)) {
   let note = 'ok';
   try {
+    /* the deck is what the email carries; the brief is its fallback. Both
+       have to survive every shape. */
+    const d = buildDeck({ companies: clone(companies), history: clone(history), today: TODAY });
+    if (!d.bytes || d.bytes.length < 1000 || !d.subject) throw new Error('built an empty deck');
     const b = buildBrief({ companies: clone(companies), history: clone(history), today: TODAY });
     if (!b.html || !b.subject) throw new Error('built an empty brief');
     briefPdf(b.pdfData);
@@ -195,6 +199,97 @@ for (const [label, arg] of [['a real tracker', COMPANIES], ['null', null], ['[]'
     console.log(`  ${('  ' + label).padEnd(30)} THREW: ${err.message}`);
     failed++;
   }
+}
+
+/* The morning email is the deck. What it carries, and what it falls back to. */
+console.log('\n  the morning email');
+const mailChecks = [];
+{
+  const check = (name, ok, detail) => mailChecks.push([name, ok, detail || '']);
+  const d = buildDeck({ companies: COMPANIES, history: HISTORY, today: TODAY });
+  const xml = Buffer.from(d.bytes).toString('utf8');
+  check('the deck reads the tracker columns',
+    ['A legal question.', 'Waiting on counsel.', 'Close it.', 'Chase counsel.', 'Decide after that.']
+      .every(t => xml.includes(t)));
+  const sourced = Buffer.from(buildDeck({ companies: COMPANIES, today: TODAY,
+    history: [{ ...HISTORY[0], source: 'Internal update' }] }).bytes).toString('utf8');
+  check('a history source label is not printed', sourced.includes('Counsel replied.') &&
+    !/Internal update/.test(sourced));
+  check('it carries what moved, and what was ticked off',
+    xml.includes('WHAT MOVED') && xml.includes('Counsel replied.') && xml.includes('Also ticked off: Beta'));
+  check('the cover is dated by day', xml.includes('7 September 2026'));
+  check('a stored decision does not print', !xml.includes('Decided to proceed.'));
+  check('no history, no WHAT MOVED slide',
+    !Buffer.from(buildDeck({ companies: COMPANIES, history: [], today: TODAY }).bytes)
+      .toString('utf8').includes('WHAT MOVED'));
+
+  const m = composeMail({ companies: COMPANIES, history: HISTORY }, TODAY);
+  check('the email attaches the .pptx and nothing else',
+    m.attachments && m.attachments.length === 1 && /\.pptx$/.test(m.attachments[0].filename) &&
+    /presentationml/.test(m.attachments[0].content_type) && !m.html,
+    m.attachments && m.attachments.map(a => a.filename).join());
+  check('its body says the deck is attached', /status deck is attached/.test(m.text), m.text);
+  const said = [m.subject, m.text, xml].map(t => (t.match(/\binternal\b|confidential/i) || [''])[0]).filter(Boolean);
+  check('the deck never says "internal" or "confidential"', !said.length, said.join(' '));
+
+  /* Break the deck and the brief has to arrive instead, saying why. */
+  const real = globalThis.BMVDeck.build;
+  globalThis.BMVDeck.build = () => { throw new Error('deck broke'); };
+  try {
+    const f = composeMail({ companies: COMPANIES, history: HISTORY }, TODAY);
+    check('a broken deck sends the PDF brief, and says why',
+      f.attachments && /\.pdf$/.test(f.attachments[0].filename) && /deck could not be built.*deck broke/.test(f.text),
+      f.note);
+    const r = composeMail({ companies: 42, history: HISTORY }, TODAY);
+    check('a broken deck and brief still send the raw actions',
+      !r.attachments && /deck could not be built/.test(r.text) && /raw list of/.test(r.text), r.note);
+  } finally { globalThis.BMVDeck.build = real; }
+}
+/* The handler itself, end to end, with Supabase and Resend stood in for. */
+{
+  const check = (name, ok, detail) => mailChecks.push([name, ok, detail || '']);
+  Object.assign(process.env, { SUPABASE_URL: 'https://sb.test', SUPABASE_SERVICE_ROLE_KEY: 'k',
+    RESEND_API_KEY: 'r', CRON_SECRET: 'cron', BRIEF_TO: '', BRIEF_FROM: '' });
+  let sent = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    const json = v => ({ ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) });
+    if (u.includes('/rest/v1/companies')) return json(COMPANIES);
+    if (u.includes('/rest/v1/history')) return json(HISTORY);
+    if (u.includes('/rest/v1/settings')) return json([]);
+    if (u.includes('api.resend.com')) { sent = JSON.parse(opts.body); return json({ id: 'x' }); }
+    throw new Error('unexpected fetch ' + u);
+  };
+  const call = async path => {
+    const res = { headers: {}, code: 0, body: null,
+      setHeader(k, v) { this.headers[k.toLowerCase()] = v; },
+      status(c) { this.code = c; return this; },
+      send(b) { this.body = b; return this; }, json(o) { this.body = o; return this; } };
+    await handler({ url: path, headers: { authorization: 'Bearer cron' } }, res);
+    return res;
+  };
+  try {
+    const dl = await call('/api/daily-brief?deck=1');
+    check('?deck=1 downloads the deck without sending',
+      dl.code === 200 && /presentationml/.test(dl.headers['content-type']) &&
+      Buffer.from(dl.body).toString('latin1').startsWith('PK') && sent === null,
+      `${dl.code} ${dl.headers['content-type']}`);
+    const cron = await call('/api/daily-brief');
+    const att = sent && sent.attachments && sent.attachments[0];
+    check('the cron emails the deck to the default recipient',
+      cron.code === 200 && att && /\.pptx$/.test(att.filename) &&
+      Buffer.from(att.content, 'base64').toString('latin1').startsWith('PK') &&
+      sent.to[0] === 'rafiksamuel@aucegypt.edu' && !sent.html && /^deck/.test(cron.body.attached),
+      cron.body && JSON.stringify(cron.body));
+    const denied = await handler({ url: '/api/daily-brief', headers: {} },
+      { status(c) { this.code = c; return this; }, send() { return this; } });
+    check('no secret, no deck', denied && denied.code === 401);
+  } finally { globalThis.fetch = realFetch; }
+}
+for (const [name, ok, detail] of mailChecks) {
+  console.log(`  ${('  ' + name).padEnd(40)} ${ok ? 'ok' : 'FAILED'}  ${detail}`);
+  if (!ok) failed++;
 }
 
 console.log('\n  behaviour, not just "it built"');
