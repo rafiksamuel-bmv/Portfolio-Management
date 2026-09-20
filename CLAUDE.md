@@ -41,6 +41,7 @@ Production: https://portfolio-management-five-cyan.vercel.app
 | `vercel.json` | Cron schedule for the brief (04:00 UTC = 7am Cairo in summer) |
 | `404.html` | Shown to anyone the middleware gate blocks |
 | `package.json`, `package-lock.json` | Only exist for `middleware.ts`'s `@vercel/functions` dependency |
+| `updates/*.sql` | One-off data syncs to paste into the Supabase SQL editor. Not part of the schema and never run automatically |
 
 ## Daily brief
 
