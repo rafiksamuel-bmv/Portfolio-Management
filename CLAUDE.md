@@ -278,6 +278,12 @@ code, the `todo` hash and the `tasks` table keep the generic name.
 - A task's daily line lives in its own `updates` jsonb log (`{at, text, by}`,
   newest last). The row shows the newest; the Update modal shows the rest.
   An open task untouched for `TK_STALE` (3) days shows its age in amber.
+  **Each log line can be edited in place or deleted** from the Update modal
+  (`renderTkLog` / `tkLogAction`, lines addressed by index in `updates`).
+  Both write at once through `saveTask`, so Undo covers them. Delete does not
+  confirm: `askConfirm`'s overlay comes earlier in the DOM and would open
+  beneath the task modal, so the toast's Undo is the safeguard. `render()`
+  redraws an open log unless a line is mid edit.
 - **`description` is free text with no shape**, opened in its own pop out by
   clicking the task's name or the line under it. It is kept apart from the
   `updates` log on purpose: background that stays true (contacts, terms,
