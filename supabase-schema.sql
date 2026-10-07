@@ -245,3 +245,69 @@ insert into public.settings (key, value) values
 ('triggerMap', '[{"instrument": "CN (BM Accelerator Convertible Note)", "triggers": "Qualified Equity Financing · Target Financing · Optional Conversion Event · Liquidity Event · Dissolution Event · Maturity · Investor termination for false representation"}, {"instrument": "CLN (Belmazad)", "triggers": "Equity Financing · Maturity Event · Dissolution Event · Liquidity Event"}, {"instrument": "SAFE (Connect Money)", "triggers": "Equity Financing · Liquidity Event · Dissolution Event · Maturity · Side letter rights (pre-emptive, key man, minority, preferred business partner, carve out, share swap)"}, {"instrument": "SHA (Flash / Tahweela)", "triggers": "Information rights · Reserved matters · Tag along and drag along · Exit or IPO"}]'::jsonb),
 ('investments', '{"source": "BMV Deck, July 2026 — slide 5, Investments Overview", "accelerator": {"companies": 11, "waves": [{"label": "Wave 1", "usd": 875000, "rate": 30.83, "companies": 7, "paid": "14 Jun 2023"}, {"label": "Wave 2", "usd": 500000, "rate": 30.89, "companies": 4, "paid": "28 Feb 2024"}]}, "direct": [{"name": "Connect Money", "tranches": [{"usd": 250000, "rate": 40}, {"usd": 750000, "rate": 48.62}], "note": "Fully paid"}, {"name": "Belmazad", "egp": 14000000, "paidEgp": 10000000, "committedEgp": 4000000, "note": "Paid 10Mn · Committed 4Mn"}], "reconcile": "The deck counts 13 companies: 11 accelerator plus Connect and Belmazad. This tracker holds 12 of them; Haktiv is not on the tracker."}'::jsonb)
 on conflict (key) do update set value = excluded.value;
+
+-- ---------- 9. to do: one person's working list, updated daily ----------
+-- Self-contained so it can be run on its own: paste from here to the end of
+-- the file. Running the whole file instead also re-applies section 8, which
+-- overwrites the live settings (dashNote, lists, fx) with the seed values.
+--
+-- A task is not a company. Most of the list is partnerships, SOPs and
+-- invoices, so it lives in its own table and never reaches history, the deck
+-- or the morning email. `company` optionally names a tracker company so the
+-- app can link the two. `updates` is the task's own dated log, newest last:
+-- the app shows the newest as the task's current line.
+create table if not exists public.tasks (
+  id          text primary key,
+  owner       text,
+  section     text,
+  title       text not null,
+  waiting_on  text,
+  company     text,
+  done        boolean not null default false,
+  done_at     timestamptz,
+  sort        int not null default 0,
+  updates     jsonb not null default '[]'::jsonb,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  updated_by  text
+);
+
+drop trigger if exists tasks_touch on public.tasks;
+create trigger tasks_touch before update on public.tasks
+  for each row execute function public.touch_updated_at();
+
+alter table public.tasks enable row level security;
+drop policy if exists read_all  on public.tasks;
+drop policy if exists write_all on public.tasks;
+create policy read_all  on public.tasks for select to authenticated using (true);
+create policy write_all on public.tasks for all    to authenticated using (true) with check (true);
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'tasks') then
+    alter publication supabase_realtime add table public.tasks;
+  end if;
+end $$;
+
+-- Seeded from the handwritten list, only when the table is empty.
+insert into public.tasks (id, owner, section, sort, title, waiting_on, company, done, done_at, updates)
+select * from (values
+('t01', 'Mina', 'Partnerships', 1, 'AWS',                  'Review',               null,            false, null::timestamptz, '[{"at":"2026-10-07","text":"Side letter done; pending review."}]'::jsonb),
+('t02', 'Mina', 'Partnerships', 2, 'Microsoft',            'Assem',                null,            false, null, '[]'::jsonb),
+('t03', 'Mina', 'Partnerships', 3, 'SC Ventures',          'Mr. Mohamed',          null,            false, null, '[]'::jsonb),
+('t04', 'Mina', 'Partnerships', 4, 'Plug and Play NDA',    'Constitutional docs',  null,            false, null, '[]'::jsonb),
+('t05', 'Mina', 'Partnerships', 5, 'MFI lessee contract',  null,                   null,            false, null, '[]'::jsonb),
+('t06', 'Mina', 'Portfolio',    1, 'Connect',              null,                   'Connect Money', true,  '2026-10-07', '[]'::jsonb),
+('t07', 'Mina', 'Portfolio',    2, 'Belmazad',             null,                   'Belmazad',      true,  '2026-10-07', '[]'::jsonb),
+('t08', 'Mina', 'Portfolio',    3, 'Subsbase',             null,                   'Subsbase',      false, null, '[]'::jsonb),
+('t09', 'Mina', 'Portfolio',    4, 'Zammit',               null,                   'Zammit',        false, null, '[]'::jsonb),
+('t10', 'Mina', 'Portfolio',    5, 'Seqoon',               null,                   'Seqoon',        false, null, '[]'::jsonb),
+('t11', 'Mina', 'Due diligence',1, 'Antler',               'Baker McKenzie',       null,            false, null, '[]'::jsonb),
+('t12', 'Mina', 'SOP',          1, 'MFI SOP',              null,                   null,            false, null, '[]'::jsonb),
+('t13', 'Mina', 'SOP',          2, 'Ecosystem SOP',        null,                   null,            false, null, '[]'::jsonb),
+('t14', 'Mina', 'Delegation',   1, 'Signature delegation', null,                   null,            false, null, '[]'::jsonb),
+('t15', 'Mina', 'Invoices',     1, 'Shawarby invoice',     null,                   null,            false, null, '[]'::jsonb)
+) as seed(id, owner, section, sort, title, waiting_on, company, done, done_at, updates)
+where not exists (select 1 from public.tasks);
