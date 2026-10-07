@@ -285,6 +285,13 @@ code, the `todo` hash and the `tasks` table keep the generic name.
   It was added after the table went live, so section 9 carries an
   `add column if not exists` for it; until that runs, saving one toasts that
   the column is missing rather than a raw Postgres error.
+- **Export Excel** (`exportTasksXlsx`) uses the tracker export's writer and
+  styling. Sheet one is the list in on-screen order; sheet two, Update Log,
+  is every dated update, newest first. It takes `tkVisible()`, the same rows
+  the tab shows, so owner, search and Hide done carry into the file.
+- Sections offered when adding a task come from `TK_SECTIONS` (Memos added at
+  the user's request) plus any section already in use. The field is free text,
+  so a new section needs no SQL.
 - `waiting_on` blank means the task is with its owner. Ticking sets `done` and
   `done_at`; done tasks sink to the bottom of their section.
 - **Section 9 of `supabase-schema.sql` is self-contained** and is how the
