@@ -264,10 +264,12 @@ places: the SQL, `CO_COLS`, and wherever it renders.
 `settings` keys: `lists`, `fx`, `dashNote`, `sources`, `reading`,
 `triggerMap`, `investments`.
 
-## To do tab
+## Mina to do tab
 
 A personal working list, seeded on 7 October from Mina's handwritten list
 (partnerships, portfolio, DD, SOP, delegation, invoices), updated daily.
+The tab and the card are titled "Mina to do" at the user's request; the
+code, the `todo` hash and the `tasks` table keep the generic name.
 
 - **`tasks` is its own table, not companies or history.** Most tasks are not
   portfolio companies, and nothing about them should reach the deck, the
