@@ -287,6 +287,29 @@
   .hrow .hsrc{ color:var(--ink-faint); font-size:11.5px; }
   @media (max-width:820px){ .hrow{ grid-template-columns:1fr; gap:2px; } .hrow.head{ display:none; } }
 
+  /* ---------- to do ---------- */
+  .tksum{ margin:0 0 6px; font-size:12.5px; color:var(--ink-soft); }
+  .tksec{ margin-top:18px; }
+  .tksec h4{ font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--maroon-bright);
+    font-weight:700; padding-bottom:6px; border-bottom:2px solid var(--border-strong); display:flex; gap:8px; }
+  .tksec h4 .c{ color:var(--ink-faint); font-weight:500; }
+  .tkrow{ display:grid; grid-template-columns:26px minmax(150px,1fr) 170px minmax(200px,2fr) 70px 64px; gap:12px;
+    padding:9px 4px; border-bottom:1px solid var(--border); font-size:12.5px; align-items:start; }
+  .tkrow input[type="checkbox"]{ width:16px; height:16px; margin:1px 0 0; accent-color:var(--maroon); cursor:pointer; }
+  .tkrow .tt{ font-weight:700; }
+  .tkrow .tco{ margin-left:6px; font-size:11px; font-weight:500; color:var(--calm); text-decoration:none; }
+  .tkrow .tco:hover{ text-decoration:underline; }
+  .tkrow .tn{ color:var(--ink-soft); white-space:pre-wrap; }
+  .tkrow .nd, .tklog .nd{ color:var(--ink-faint); font-family:"IBM Plex Mono",monospace; font-size:11px; margin-right:6px; }
+  .tkrow .tage{ font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-faint); }
+  .tkrow .tage.stale{ color:var(--warn); font-weight:700; }
+  .tkrow.done .tt, .tkrow.done .tn{ text-decoration:line-through; color:var(--ink-faint); }
+  .tkrow.done{ opacity:.7; }
+  .tklog{ margin-top:14px; font-size:12px; color:var(--ink-soft); max-height:180px; overflow:auto; }
+  .tklog div{ padding:5px 0; border-top:1px solid var(--border); white-space:pre-wrap; }
+  @media (max-width:820px){ .tkrow{ grid-template-columns:26px 1fr; gap:3px 10px; }
+    .tkrow > :nth-child(n+3){ grid-column:2; } }
+
   /* ---------- legend ---------- */
   .lgrid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
   @media (max-width:900px){ .lgrid{ grid-template-columns:repeat(2,1fr); } }
@@ -406,6 +429,7 @@
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="dashboard" type="button">Dashboard</button>
       <button class="tab" data-tab="tracker" type="button">Tracker <span class="n" id="nTracker"></span></button>
+      <button class="tab" data-tab="todo" type="button">To do <span class="n" id="nTodo"></span></button>
       <button class="tab" data-tab="updates" type="button">Updates <span class="n" id="nUpdates"></span></button>
       <button class="tab" data-tab="history" type="button">History Log <span class="n" id="nHistory"></span></button>
       <button class="tab" data-tab="legend" type="button">Legend</button>
@@ -481,6 +505,20 @@
           <tbody id="tbody"></tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+  <section id="view-todo" hidden>
+    <div class="card cardp">
+      <div class="toolbar">
+        <select id="tkOwner"></select>
+        <input type="search" id="tkQ" placeholder="Search tasks…">
+        <button class="chip" id="tkHideDone" type="button">Hide done</button>
+        <span class="spacer"></span>
+        <button class="btn btn-sm btn-primary" id="tkAdd" type="button">+ Add task</button>
+      </div>
+      <p class="tksum" id="tkSum"></p>
+      <div id="tkList"></div>
     </div>
   </section>
 
@@ -602,6 +640,30 @@
 </div>
 
 <div class="toasts" id="toasts"></div>
+<div id="taskModal" class="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Task">
+    <div class="modal-hd"><h2 id="taskModalTitle">Update task</h2>
+      <p>Write today's line in Update. Earlier lines stay in the log below.</p></div>
+    <div class="modal-bd">
+      <div class="eform two">
+        <div class="full"><label for="tkTitle">Task</label><input type="text" id="tkTitle"></div>
+        <div><label for="tkSection">Section</label><input type="text" id="tkSection" list="tkSectionList"></div>
+        <div><label for="tkOwnerIn">Owner</label><input type="text" id="tkOwnerIn" list="tkOwnerList"></div>
+        <div><label for="tkWaiting">Pending on</label><input type="text" id="tkWaiting" placeholder="Blank if it is with the owner"></div>
+        <div><label for="tkCompany">Tracker company</label><select id="tkCompany"></select></div>
+        <div class="full"><label for="tkNote">Update</label><textarea id="tkNote" placeholder="Where it stands today…"></textarea></div>
+      </div>
+      <div class="tklog" id="tkLog"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" id="tkDelete" type="button" hidden style="margin-right:auto;">Delete</button>
+        <button class="btn" id="tkCancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="tkSave" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+<datalist id="tkSectionList"></datalist>
+<datalist id="tkOwnerList"></datalist>
 <datalist id="ownerList"></datalist>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js"></script>
@@ -651,12 +713,13 @@
   var state={ meta:{fx:50,asOf:"",lastUpdatedAt:"",lastUpdatedRole:""}, companies:[], history:[],
               messages:[], lists:{priority:[],issueType:[],bucket:[],trigger:[],status:[],
               track:[],yesNo:[]}, triggerMap:[], reading:[], sources:"", dashNote:"",
-              investments:null, activity:[] };
+              investments:null, activity:[], tasks:[], tasksMissing:false };
   var seat=null, session=null, profile=null, readOnly=false;
   var tab="dashboard", openId=null, editing=null;
   var sortKey="num", sortDir=1;
   var filters={q:"",bucket:"all",priority:"all",status:"all",legal:false,attn:false};
   var hF={company:"all",q:""}, uF={company:"all"}, histEditId=null, focusField=null;
+  var tkF={owner:"all",q:"",hideDone:false}, taskEditId=null;
 
   function clone(o){ return (typeof structuredClone==="function")?structuredClone(o):JSON.parse(JSON.stringify(o)); }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
@@ -852,10 +915,14 @@
       sb.from("companies").select("*").order("num"),
       sb.from("history").select("*").order("entry_date",{ascending:false}),
       sb.from("messages").select("*").order("created_at"),
-      sb.from("settings").select("*")
+      sb.from("settings").select("*"),
+      sb.from("tasks").select("*").order("sort")
     ]).then(function(res){
       if(mine!==loadSeq) return;
-      var err=res.filter(function(r){ return r.error; })[0];
+      /* tasks is left out of the error check on purpose: until section 9 of
+         the schema has been run the table does not exist, and that should
+         cost the To do tab, not the whole ledger. */
+      var err=res.slice(0,4).filter(function(r){ return r.error; })[0];
       if(err){ showLoadError(err.error.message); return; }
       state.companies = res[0].data.map(rowToCo);
       state.history   = res[1].data.map(function(h){
@@ -865,6 +932,8 @@
         return {id:m.id, ts:m.created_at, seat:m.seat, companyId:m.company_id, text:m.body}; });
       var kv={}; res[3].data.forEach(function(r){ kv[r.key]=r.value; });
       state.rawSettings=kv;
+      state.tasksMissing=!!res[4].error;
+      state.tasks=res[4].error? [] : res[4].data.map(rowToTask);
       if(kv.lists) state.lists=kv.lists;
       if(kv.fx!=null) state.meta.fx=kv.fx;
       if(kv.asOf) state.meta.asOf=kv.asOf;
@@ -1107,6 +1176,74 @@
       busy(false); if(r.error){ state=prev; render(); afterWrite(r.error); } });
   }
 
+  /* ---------- to do: writes ----------
+     Same shape as saveCompany: apply locally, render, write, revert on error,
+     and record the inverse first so Undo covers every change. */
+  var TK_COLS={ owner:"owner", section:"section", title:"title", waitingOn:"waiting_on",
+    company:"company", done:"done", doneAt:"done_at", sort:"sort", updates:"updates" };
+  var TK_NULLABLE=["owner","section","waiting_on","company","done_at"];
+  function rowToTask(r){
+    return { id:r.id, owner:r.owner||"", section:r.section||"", title:r.title||"",
+      waitingOn:r.waiting_on||"", company:r.company||"", done:!!r.done, doneAt:r.done_at||"",
+      sort:r.sort||0, updates:Array.isArray(r.updates)?r.updates:[],
+      createdAt:r.created_at||"", updatedAt:r.updated_at||"" };
+  }
+  function taskToRow(p){
+    var r={}; Object.keys(p).forEach(function(k){
+      if(!TK_COLS[k]) return;
+      var v=p[k];
+      if(v==="" && TK_NULLABLE.indexOf(TK_COLS[k])>-1) v=null;
+      r[TK_COLS[k]]=v; });
+    return r;
+  }
+  function findTask(id){ return state.tasks.filter(function(t){ return t.id===id; })[0]; }
+  function saveTask(id, patch, label){
+    if(!sb) return;
+    var before=findTask(id); if(!before) return;
+    var prev=clone(state);
+    var was={}; Object.keys(patch).forEach(function(k){ was[k]=before[k]; });
+    pushUndo(label || ("edit to "+before.title), function(){ saveTask(id, was); });
+    Object.keys(patch).forEach(function(k){ before[k]=patch[k]; });
+    before.updatedAt=new Date().toISOString();
+    render(); busy(true);
+    var row=taskToRow(patch); row.updated_by=seat?seat.role:null;
+    sb.from("tasks").update(row).eq("id",id).then(function(r){
+      busy(false);
+      if(r.error){ state=prev; render(); afterWrite(r.error); }
+    });
+  }
+  function insertTask(t, label){
+    if(!sb) return;
+    var prev=clone(state);
+    /* Recorded before the write, not in its callback: by then an Undo that
+       triggered this insert has finished, and the inverse would stack. */
+    if(label) pushUndo(label, function(){ removeTask(t.id); });
+    state.tasks.push(t); render(); busy(true);
+    var row=taskToRow(t); row.id=t.id; row.updated_by=seat?seat.role:null;
+    sb.from("tasks").insert(row).then(function(r){
+      busy(false);
+      if(r.error){ state=prev; render(); afterWrite(r.error); }
+    });
+  }
+  function removeTask(id){
+    if(!sb) return;
+    var was=findTask(id); if(!was) return;
+    var prev=clone(state);
+    pushUndo("deleted "+was.title, function(){ insertTask(clone(was)); });
+    state.tasks=state.tasks.filter(function(t){ return t.id!==id; });
+    render(); busy(true);
+    sb.from("tasks").delete().eq("id",id).then(function(r){
+      busy(false);
+      if(r.error){ state=prev; render(); afterWrite(r.error); }
+    });
+  }
+  function toggleTask(id){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    var t=findTask(id); if(!t) return;
+    saveTask(id, {done:!t.done, doneAt:t.done?"":new Date().toISOString()},
+      (t.done?"reopened ":"ticked ")+t.title);
+  }
+
   /* ---------- realtime ---------- */
   var lastCheck=0, rtUp=false, chan=null;
   function subscribeRealtime(){
@@ -1118,6 +1255,7 @@
       .on("postgres_changes",{event:"*",schema:"public",table:"messages"},hit)
       .on("postgres_changes",{event:"*",schema:"public",table:"history"},hit)
       .on("postgres_changes",{event:"*",schema:"public",table:"settings"},hit)
+      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},hit)
       .subscribe(function(status){
         rtUp = (status==="SUBSCRIBED");
         paintSync();
@@ -1822,6 +1960,155 @@
     });
   }
 
+  /* ---------- to do ----------
+     One person's working list, kept apart from the companies: most of it is
+     partnerships, SOPs and invoices. Sections come in the order the list was
+     written, then any new ones alphabetically. Within a section, open tasks
+     keep their written order and done ones sink to the bottom. */
+  var TK_SECTIONS=["Partnerships","Portfolio","Due diligence","SOP","Delegation","Invoices"];
+  var TK_STALE=3;                          /* days without an update before an open task is flagged */
+  /* Timestamps are UTC; the day that matters is the reader's, or an update
+     made before 3am Cairo would read as yesterday's. */
+  function tkDaysAgo(ts){
+    if(!ts) return null;
+    var d=new Date(ts); if(isNaN(d)) return null;
+    return -daysFromToday(new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())));
+  }
+  function tkAge(t){ return tkDaysAgo(t.updatedAt); }
+  function tkLatest(t){ return t.updates.length? t.updates[t.updates.length-1] : null; }
+  function tkSectionOrder(names){
+    return names.slice().sort(function(a,b){
+      var i=TK_SECTIONS.indexOf(a), j=TK_SECTIONS.indexOf(b);
+      if(i<0) i=99; if(j<0) j=99;
+      return i!==j? i-j : a.localeCompare(b);
+    });
+  }
+  function tkCoId(name){
+    var c=state.companies.filter(function(x){ return x.company===name; })[0];
+    return c? c.id : null;
+  }
+  function renderTodo(){
+    var owners=Array.from(new Set(state.tasks.map(function(t){ return t.owner; }).filter(Boolean))).sort();
+    fillSelect("tkOwner", owners, "Everyone's tasks");
+    if(tkF.owner!=="all" && owners.indexOf(tkF.owner)===-1) tkF.owner="all";
+    $("tkOwner").value=tkF.owner;
+    $("tkAdd").disabled=state.tasksMissing;
+    if(state.tasksMissing){
+      $("tkSum").textContent="";
+      $("tkList").innerHTML='<div class="empty">The to do list is not set up in the database yet. '+
+        'Run section 9 of supabase-schema.sql in the Supabase SQL editor, then reload.</div>';
+      return;
+    }
+    var q=tkF.q.trim().toLowerCase();
+    var mine=state.tasks.filter(function(t){ return tkF.owner==="all" || t.owner===tkF.owner; });
+    var open=mine.filter(function(t){ return !t.done; });
+    var waiting=open.filter(function(t){ return t.waitingOn; }).length;
+    var stale=open.filter(function(t){ var a=tkAge(t); return a!==null && a>=TK_STALE; }).length;
+    var doneToday=mine.filter(function(t){ return t.done && tkDaysAgo(t.doneAt)===0; }).length;
+    $("tkSum").textContent=open.length+" open, "+waiting+" pending on someone else"+
+      (stale? ", "+stale+" not updated in "+TK_STALE+"+ days" : "")+
+      " · "+(mine.length-open.length)+" done"+(doneToday? " ("+doneToday+" today)" : "");
+    var rows=mine.filter(function(t){
+      if(tkF.hideDone && t.done) return false;
+      if(!q) return true;
+      var l=tkLatest(t);
+      return [t.title,t.section,t.waitingOn,t.company,t.owner,l?l.text:""].join(" ").toLowerCase().indexOf(q)>-1;
+    });
+    var by={}; rows.forEach(function(t){ var k=t.section||"Other"; (by[k]=by[k]||[]).push(t); });
+    var html=tkSectionOrder(Object.keys(by)).map(function(sec){
+      var list=by[sec].sort(function(a,b){ return (a.done-b.done) || (a.sort-b.sort) || a.title.localeCompare(b.title); });
+      var nOpen=list.filter(function(t){ return !t.done; }).length;
+      return '<div class="tksec"><h4>'+esc(sec)+'<span class="c">'+nOpen+' open</span></h4>'+
+        list.map(tkRowHtml).join("")+'</div>';
+    }).join("");
+    $("tkList").innerHTML=html || '<div class="empty">'+
+      (state.tasks.length? "No tasks match." : "No tasks yet. Add the first one.")+'</div>';
+    Array.prototype.forEach.call($("tkList").querySelectorAll("[data-tk]"), function(el){
+      var id=el.getAttribute("data-tk"), a=el.getAttribute("data-act");
+      el.addEventListener(a==="tick"?"change":"click", function(e){
+        e.stopPropagation();
+        if(a==="tick") toggleTask(id);
+        if(a==="edit") openTaskModal({id:id});
+      });
+    });
+  }
+  function tkRowHtml(t){
+    var l=tkLatest(t), age=tkAge(t), coId=t.company? tkCoId(t.company) : null;
+    var ageTxt = t.done ? (t.doneAt? "\u2713 "+dmy(t.doneAt.slice(0,10)).replace(/ \d{4}$/,"") : "\u2713")
+               : age===null ? "" : age<=0 ? "today" : age+"d";
+    var stale = !t.done && age!==null && age>=TK_STALE;
+    return '<div class="tkrow'+(t.done?" done":"")+'">'+
+      '<input type="checkbox" data-act="tick" data-tk="'+esc(t.id)+'"'+(t.done?" checked":"")+
+        (readOnly?" disabled":"")+' aria-label="Done: '+esc(t.title)+'">'+
+      '<div><span class="tt">'+esc(t.title)+'</span>'+
+        (coId? '<a class="tco" href="#tracker/'+esc(coId)+'">tracker \u2197</a>' : "")+
+        (tkF.owner==="all" && t.owner? '<div class="nd">'+esc(t.owner)+'</div>' : "")+'</div>'+
+      '<div>'+(t.waitingOn? '<span class="pill p-warn">Pending '+esc(t.waitingOn)+'</span>'
+                          : (t.done? "" : '<span class="pill p-calm">With '+esc(t.owner||"owner")+'</span>'))+'</div>'+
+      '<div class="tn">'+(l? '<span class="nd">'+esc(dmy(l.at).replace(/ \d{4}$/,""))+'</span>'+esc(l.text) : "")+'</div>'+
+      '<div class="tage'+(stale?" stale":"")+'" title="Last touched">'+esc(ageTxt)+'</div>'+
+      '<div><button class="btn btn-sm" type="button" data-act="edit" data-tk="'+esc(t.id)+'">Update</button></div>'+
+    '</div>';
+  }
+  function openTaskModal(opts){
+    if(readOnly){ toast("Read only view.","warn"); return; }
+    opts=opts||{};
+    var t=opts.id? findTask(opts.id) : null;
+    taskEditId=t? t.id : null;
+    $("tkCompany").innerHTML='<option value="">None</option>'+state.companies.map(function(c){
+      return '<option>'+esc(c.company)+'</option>'; }).join("");
+    $("tkSectionList").innerHTML=tkSectionOrder(Array.from(new Set(TK_SECTIONS.concat(
+      state.tasks.map(function(x){ return x.section; }).filter(Boolean))))).map(function(x){
+      return '<option value="'+esc(x)+'">'; }).join("");
+    $("tkOwnerList").innerHTML=Array.from(new Set(PEOPLE.concat(
+      state.tasks.map(function(x){ return x.owner; }).filter(Boolean)))).map(function(x){
+      return '<option value="'+esc(x)+'">'; }).join("");
+    $("tkTitle").value=t? t.title : "";
+    $("tkSection").value=t? t.section : "";
+    var owners=Array.from(new Set(state.tasks.map(function(x){ return x.owner; }).filter(Boolean)));
+    $("tkOwnerIn").value=t? t.owner : tkF.owner!=="all"? tkF.owner : owners.length===1? owners[0] : "";
+    $("tkWaiting").value=t? t.waitingOn : "";
+    $("tkCompany").value=t? t.company : "";
+    if(t && t.company && $("tkCompany").value!==t.company){
+      $("tkCompany").insertAdjacentHTML("beforeend",'<option>'+esc(t.company)+'</option>');
+      $("tkCompany").value=t.company;
+    }
+    $("tkNote").value="";
+    $("tkLog").innerHTML=t && t.updates.length? t.updates.slice().reverse().map(function(u){
+      return '<div><span class="nd">'+esc(dmy(u.at))+'</span>'+esc(u.text)+'</div>'; }).join("") : "";
+    $("taskModalTitle").textContent=t? t.title : "Add a task";
+    $("tkDelete").hidden=!t;
+    $("tkSave").textContent=t? "Save" : "Add task";
+    $("taskModal").hidden=false;
+    setTimeout(function(){ (t? $("tkNote") : $("tkTitle")).focus(); }, 0);
+  }
+  function saveTaskModal(){
+    var title=$("tkTitle").value.trim();
+    if(!title){ toast("Give the task a name.","warn"); return; }
+    var note=$("tkNote").value.trim();
+    var fields={ title:title, section:$("tkSection").value.trim(), owner:$("tkOwnerIn").value.trim(),
+      waitingOn:$("tkWaiting").value.trim(), company:$("tkCompany").value };
+    var entry=note? {at:today(), text:note, by:seat?seat.role:null} : null;
+    $("taskModal").hidden=true;
+    if(taskEditId){
+      var t=findTask(taskEditId); taskEditId=null;
+      if(!t) return;
+      var patch={};
+      Object.keys(fields).forEach(function(k){ if(fields[k]!==t[k]) patch[k]=fields[k]; });
+      var l=tkLatest(t);
+      if(entry && !(l && l.at===entry.at && l.text===entry.text)) patch.updates=t.updates.concat([entry]);
+      if(!Object.keys(patch).length) return;
+      saveTask(t.id, patch, (patch.updates? "updated " : "edited ")+t.title);
+    } else {
+      var sib=state.tasks.filter(function(x){ return x.section===fields.section; });
+      fields.id=uid(); fields.done=false; fields.doneAt="";
+      fields.sort=sib.reduce(function(m,x){ return Math.max(m,x.sort); },0)+1;
+      fields.updates=entry? [entry] : [];
+      fields.updatedAt=new Date().toISOString();
+      insertTask(fields, "added "+title);
+    }
+  }
+
   /* ---------- legend ---------- */
   function renderLegend(){
     var n={priority:"Priority",issueType:"Issue type",bucket:"Bucket",trigger:"Trigger",
@@ -2083,7 +2370,7 @@
     tab=t;
     Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(b){
       b.classList.toggle("active", b.getAttribute("data-tab")===t); });
-    ["dashboard","tracker","updates","history","legend"].forEach(function(v){ $("view-"+v).hidden=(v!==t); });
+    ["dashboard","tracker","todo","updates","history","legend"].forEach(function(v){ $("view-"+v).hidden=(v!==t); });
     syncHash(); render();
   }
   function syncHash(){
@@ -2092,7 +2379,7 @@
   }
   function readHash(){
     var h=(location.hash||"").replace(/^#/,"").split("/");
-    if(h[0]&&["dashboard","tracker","updates","history","legend"].indexOf(h[0])>-1){
+    if(h[0]&&["dashboard","tracker","todo","updates","history","legend"].indexOf(h[0])>-1){
       tab=h[0]; if(h[1]) openId=h[1];
     }
   }
@@ -2119,10 +2406,12 @@
     $("nTracker").textContent=String(state.companies.length);
     $("nHistory").textContent=String(state.history.length);
     $("nUpdates").textContent=String(state.messages.length);
+    $("nTodo").textContent=state.tasksMissing? "" : String(state.tasks.filter(function(t){ return !t.done; }).length);
     paintUndo();
     var bc=document.querySelector(".briefcard"); if(bc) bc.hidden=readOnly;
     if(tab==="dashboard") renderDashboard();
     if(tab==="tracker") renderTracker();
+    if(tab==="todo") renderTodo();
     if(tab==="updates") renderUpdates();
     if(tab==="history") renderHistory();
     if(tab==="legend") renderLegend();
@@ -2242,6 +2531,21 @@
       deleteHistEntry(id);
     });
 
+    $("tkOwner").addEventListener("change",function(e){ tkF.owner=e.target.value; renderTodo(); });
+    $("tkQ").addEventListener("input",function(e){ tkF.q=e.target.value; renderTodo(); });
+    $("tkHideDone").addEventListener("click",function(){ tkF.hideDone=!tkF.hideDone;
+      $("tkHideDone").classList.toggle("on",tkF.hideDone); renderTodo(); });
+    $("tkAdd").addEventListener("click",function(){ openTaskModal(); });
+    $("tkCancel").addEventListener("click",function(){ $("taskModal").hidden=true; taskEditId=null; });
+    $("tkSave").addEventListener("click", saveTaskModal);
+    $("tkNote").addEventListener("keydown",function(e){
+      if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); saveTaskModal(); } });
+    $("tkDelete").addEventListener("click",function(){
+      var t=taskEditId? findTask(taskEditId) : null;
+      $("taskModal").hidden=true; taskEditId=null;
+      if(t) askConfirm("Delete this task?", t.title, "Delete", function(){ removeTask(t.id); });
+    });
+
     $("fxSave").addEventListener("click",function(){
       var v=parseFloat($("fxInput").value);
       if(isNaN(v)||v<=0){ toast("Enter a positive rate.","bad"); return; }
@@ -2291,7 +2595,7 @@
         e.preventDefault(); doUndo(); return;
       }
       if(e.key==="Escape"){
-        var open=["confirmModal","notiModal","histModal"].filter(function(id){ return !$(id).hidden; });
+        var open=["confirmModal","notiModal","histModal","taskModal"].filter(function(id){ return !$(id).hidden; });
         if(open.length){ $(open[0]).hidden=true; return; }
         if(editing){ editing=null; renderTracker(); return; }
         if(openId){ openId=null; syncHash(); renderTracker(); }

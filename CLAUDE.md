@@ -254,7 +254,8 @@ Environment, all set in Vercel and never in the repo: `SUPABASE_URL`,
 ## Data model
 
 Tables: `companies` (12 rows), `history` (58 rows), `messages`, `settings`
-(key/jsonb), `profiles` (one per auth user, carries `role`).
+(key/jsonb), `profiles` (one per auth user, carries `role`), `tasks` (the To do
+tab, see below).
 
 JavaScript uses camelCase, Postgres uses snake_case. The mapping lives in the
 `CO_COLS` object; `rowToCo()` and `patchToRow()` translate. Add a column in three
@@ -262,6 +263,29 @@ places: the SQL, `CO_COLS`, and wherever it renders.
 
 `settings` keys: `lists`, `fx`, `dashNote`, `sources`, `reading`,
 `triggerMap`, `investments`.
+
+## To do tab
+
+A personal working list, seeded on 7 October from Mina's handwritten list
+(partnerships, portfolio, DD, SOP, delegation, invoices), updated daily.
+
+- **`tasks` is its own table, not companies or history.** Most tasks are not
+  portfolio companies, and nothing about them should reach the deck, the
+  morning email or WHAT MOVED. `company` optionally names a tracker company,
+  which renders as a link to that row; it routes nothing.
+- A task's daily line lives in its own `updates` jsonb log (`{at, text, by}`,
+  newest last). The row shows the newest; the Update modal shows the rest.
+  An open task untouched for `TK_STALE` (3) days shows its age in amber.
+- `waiting_on` blank means the task is with its owner. Ticking sets `done` and
+  `done_at`; done tasks sink to the bottom of their section.
+- **Section 9 of `supabase-schema.sql` is self-contained** and is how the
+  table is created: run that block alone. Running the whole file also re-runs
+  section 8, which overwrites live settings with the seed. `loadAll()` leaves
+  `tasks` out of its error check, so before the block is run the tab says so
+  and the rest of the ledger loads normally.
+- Writes go through `saveTask` / `insertTask` / `removeTask`, same pattern as
+  `saveCompany`, each recording its inverse **before** the write so an undo
+  does not stack a new inverse when its callback lands.
 
 ## Code conventions
 
