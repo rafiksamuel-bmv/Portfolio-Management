@@ -436,7 +436,7 @@
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="dashboard" type="button">Dashboard</button>
       <button class="tab" data-tab="tracker" type="button">Tracker <span class="n" id="nTracker"></span></button>
-      <button class="tab" data-tab="todo" type="button">To do <span class="n" id="nTodo"></span></button>
+      <button class="tab" data-tab="todo" type="button">Mina to do <span class="n" id="nTodo"></span></button>
       <button class="tab" data-tab="updates" type="button">Updates <span class="n" id="nUpdates"></span></button>
       <button class="tab" data-tab="history" type="button">History Log <span class="n" id="nHistory"></span></button>
       <button class="tab" data-tab="legend" type="button">Legend</button>
@@ -517,6 +517,7 @@
 
   <section id="view-todo" hidden>
     <div class="card cardp">
+      <h3>Mina to do</h3>
       <div class="toolbar">
         <select id="tkOwner"></select>
         <input type="search" id="tkQ" placeholder="Search tasks…">
@@ -2018,7 +2019,7 @@
     $("tkAdd").disabled=state.tasksMissing;
     if(state.tasksMissing){
       $("tkSum").textContent="";
-      $("tkList").innerHTML='<div class="empty">The to do list is not set up in the database yet. '+
+      $("tkList").innerHTML='<div class="empty">Mina\u2019s to do list is not set up in the database yet. '+
         'Run section 9 of supabase-schema.sql in the Supabase SQL editor, then reload.</div>';
       return;
     }
