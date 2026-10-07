@@ -523,6 +523,7 @@
         <input type="search" id="tkQ" placeholder="Search tasks…">
         <button class="chip" id="tkHideDone" type="button">Hide done</button>
         <span class="spacer"></span>
+        <button class="btn btn-sm" id="tkExport" type="button">Export Excel</button>
         <button class="btn btn-sm btn-primary" id="tkAdd" type="button">+ Add task</button>
       </div>
       <p class="tksum" id="tkSum"></p>
@@ -1989,7 +1990,7 @@
      partnerships, SOPs and invoices. Sections come in the order the list was
      written, then any new ones alphabetically. Within a section, open tasks
      keep their written order and done ones sink to the bottom. */
-  var TK_SECTIONS=["Partnerships","Portfolio","Due diligence","SOP","Delegation","Invoices"];
+  var TK_SECTIONS=["Partnerships","Portfolio","Due diligence","SOP","Delegation","Invoices","Memos"];
   var TK_STALE=3;                          /* days without an update before an open task is flagged */
   /* Timestamps are UTC; the day that matters is the reader's, or an update
      made before 3am Cairo would read as yesterday's. */
@@ -2011,20 +2012,41 @@
     var c=state.companies.filter(function(x){ return x.company===name; })[0];
     return c? c.id : null;
   }
+  function tkMine(){
+    return state.tasks.filter(function(t){ return tkF.owner==="all" || t.owner===tkF.owner; });
+  }
+  /* What the list shows: owner, search and Hide done applied. The export
+     takes the same rows, so the sheet matches the screen. */
+  function tkVisible(){
+    var q=tkF.q.trim().toLowerCase();
+    return tkMine().filter(function(t){
+      if(tkF.hideDone && t.done) return false;
+      if(!q) return true;
+      var l=tkLatest(t);
+      return [t.title,t.section,t.waitingOn,t.company,t.owner,t.description,l?l.text:""].join(" ").toLowerCase().indexOf(q)>-1;
+    });
+  }
+  function tkSorted(rows){
+    var order=tkSectionOrder(Array.from(new Set(rows.map(function(t){ return t.section||"Other"; }))));
+    return rows.slice().sort(function(a,b){
+      return (order.indexOf(a.section||"Other")-order.indexOf(b.section||"Other")) ||
+        (a.done-b.done) || (a.sort-b.sort) || a.title.localeCompare(b.title);
+    });
+  }
   function renderTodo(){
     var owners=Array.from(new Set(state.tasks.map(function(t){ return t.owner; }).filter(Boolean))).sort();
     fillSelect("tkOwner", owners, "Everyone's tasks");
     if(tkF.owner!=="all" && owners.indexOf(tkF.owner)===-1) tkF.owner="all";
     $("tkOwner").value=tkF.owner;
     $("tkAdd").disabled=state.tasksMissing;
+    $("tkExport").disabled=state.tasksMissing;
     if(state.tasksMissing){
       $("tkSum").textContent="";
       $("tkList").innerHTML='<div class="empty">Mina\u2019s to do list is not set up in the database yet. '+
         'Run section 9 of supabase-schema.sql in the Supabase SQL editor, then reload.</div>';
       return;
     }
-    var q=tkF.q.trim().toLowerCase();
-    var mine=state.tasks.filter(function(t){ return tkF.owner==="all" || t.owner===tkF.owner; });
+    var mine=tkMine();
     var open=mine.filter(function(t){ return !t.done; });
     var waiting=open.filter(function(t){ return t.waitingOn; }).length;
     var stale=open.filter(function(t){ var a=tkAge(t); return a!==null && a>=TK_STALE; }).length;
@@ -2032,12 +2054,7 @@
     $("tkSum").textContent=open.length+" open, "+waiting+" pending on someone else"+
       (stale? ", "+stale+" not updated in "+TK_STALE+"+ days" : "")+
       " · "+(mine.length-open.length)+" done"+(doneToday? " ("+doneToday+" today)" : "");
-    var rows=mine.filter(function(t){
-      if(tkF.hideDone && t.done) return false;
-      if(!q) return true;
-      var l=tkLatest(t);
-      return [t.title,t.section,t.waitingOn,t.company,t.owner,t.description,l?l.text:""].join(" ").toLowerCase().indexOf(q)>-1;
-    });
+    var rows=tkVisible();
     var by={}; rows.forEach(function(t){ var k=t.section||"Other"; (by[k]=by[k]||[]).push(t); });
     var html=tkSectionOrder(Object.keys(by)).map(function(sec){
       var list=by[sec].sort(function(a,b){ return (a.done-b.done) || (a.sort-b.sort) || a.title.localeCompare(b.title); });
@@ -2400,6 +2417,42 @@
     dlBlob(blob, "portfolio-tracker-"+today()+".xlsx");
   }
 
+  /* Mina to do as a workbook: the list as it stands, then every dated update
+     on a second sheet. Same writer and styling as the tracker export, and the
+     same rows the tab is showing, filters included. */
+  var XL_TASK_COLS=[
+    {k:"section",h:"Section",w:14},{k:"title",h:"Task",w:26,t:"b"},
+    {k:"status",h:"Status",w:9},{k:"waitingOn",h:"Pending On",w:20},
+    {k:"latest",h:"Latest Update",w:48},{k:"latestAt",h:"Updated",w:12,t:"d"},
+    {k:"description",h:"Description",w:56},{k:"company",h:"Tracker Company",w:15},
+    {k:"owner",h:"Owner",w:10},{k:"doneAt",h:"Done On",w:12,t:"d"}];
+  var XL_TASKLOG_COLS=[
+    {k:"at",h:"Date",w:13,t:"d"},{k:"section",h:"Section",w:14},{k:"title",h:"Task",w:26,t:"b"},
+    {k:"text",h:"Update",w:90},{k:"by",h:"By",w:12}];
+  function exportTasksXlsx(){
+    var tasks=tkSorted(tkVisible());
+    var rows=tasks.map(function(t){
+      var l=tkLatest(t);
+      return { section:t.section||"Other", title:t.title, status:t.done?"Done":"Open",
+        waitingOn:t.waitingOn || (t.done? "" : "With "+(t.owner||"owner")),
+        latest:l?l.text:"", latestAt:l?l.at:"", description:t.description,
+        company:t.company, owner:t.owner, doneAt:t.done?(t.doneAt||""):"" };
+    });
+    var log=[];
+    tasks.forEach(function(t){ t.updates.forEach(function(u){
+      log.push({at:u.at, section:t.section||"Other", title:t.title, text:u.text, by:u.by||""}); }); });
+    log.sort(function(a,b){ return String(b.at).localeCompare(String(a.at)); });
+    var open=tasks.filter(function(t){ return !t.done; }).length;
+    var filtered=tasks.length!==state.tasks.length;
+    dlBlob(buildXlsx([
+      {name:"Mina to do", first:2, xSplit:3, cols:XL_TASK_COLS, rows:rows, title:"Mina to do",
+       sub:open+" open, "+(tasks.length-open)+" done"+
+         (filtered?" (filtered from "+state.tasks.length+")":"")+"  |  Exported "+dmy(today())},
+      {name:"Update Log", first:1, cols:XL_TASKLOG_COLS, rows:log, title:"Update Log",
+       sub:"Every dated update on the tasks above, newest first."}
+    ]), "mina-to-do-"+today()+".xlsx");
+  }
+
   function dlBlob(blob, name){
     var url=URL.createObjectURL(blob), a=document.createElement("a");
     a.href=url; a.download=name;
@@ -2589,6 +2642,10 @@
     $("tkHideDone").addEventListener("click",function(){ tkF.hideDone=!tkF.hideDone;
       $("tkHideDone").classList.toggle("on",tkF.hideDone); renderTodo(); });
     $("tkAdd").addEventListener("click",function(){ openTaskModal(); });
+    $("tkExport").addEventListener("click",function(){
+      try{ exportTasksXlsx(); }
+      catch(e){ toast("Could not build the Excel file.","bad"); }
+    });
     $("tkCancel").addEventListener("click",function(){ $("taskModal").hidden=true; taskEditId=null; });
     $("tkSave").addEventListener("click", saveTaskModal);
     $("descSave").addEventListener("click", saveDescModal);
