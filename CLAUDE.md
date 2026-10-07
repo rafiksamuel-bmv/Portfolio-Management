@@ -276,6 +276,13 @@ A personal working list, seeded on 7 October from Mina's handwritten list
 - A task's daily line lives in its own `updates` jsonb log (`{at, text, by}`,
   newest last). The row shows the newest; the Update modal shows the rest.
   An open task untouched for `TK_STALE` (3) days shows its age in amber.
+- **`description` is free text with no shape**, opened in its own pop out by
+  clicking the task's name or the line under it. It is kept apart from the
+  `updates` log on purpose: background that stays true (contacts, terms,
+  links) versus what happened on a given day. The row shows its first line.
+  It was added after the table went live, so section 9 carries an
+  `add column if not exists` for it; until that runs, saving one toasts that
+  the column is missing rather than a raw Postgres error.
 - `waiting_on` blank means the task is with its owner. Ticking sets `done` and
   `done_at`; done tasks sink to the bottom of their section.
 - **Section 9 of `supabase-schema.sql` is self-contained** and is how the

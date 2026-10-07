@@ -261,6 +261,7 @@ create table if not exists public.tasks (
   owner       text,
   section     text,
   title       text not null,
+  description text,
   waiting_on  text,
   company     text,
   done        boolean not null default false,
@@ -271,6 +272,9 @@ create table if not exists public.tasks (
   updated_at  timestamptz not null default now(),
   updated_by  text
 );
+
+-- Added 7 Oct, after the table first went live: free text per task.
+alter table public.tasks add column if not exists description text;
 
 drop trigger if exists tasks_touch on public.tasks;
 create trigger tasks_touch before update on public.tasks

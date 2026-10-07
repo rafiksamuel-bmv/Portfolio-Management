@@ -296,7 +296,14 @@
   .tkrow{ display:grid; grid-template-columns:26px minmax(150px,1fr) 170px minmax(200px,2fr) 70px 64px; gap:12px;
     padding:9px 4px; border-bottom:1px solid var(--border); font-size:12.5px; align-items:start; }
   .tkrow input[type="checkbox"]{ width:16px; height:16px; margin:1px 0 0; accent-color:var(--maroon); cursor:pointer; }
-  .tkrow .tt{ font-weight:700; }
+  .tkrow .tt{ font-weight:700; background:none; border:0; padding:0; font:inherit; font-weight:700;
+    color:inherit; cursor:pointer; text-align:left; }
+  .tkrow .tt:hover{ color:var(--maroon-bright); }
+  .tkrow .tdesc{ display:block; background:none; border:0; padding:0; margin-top:3px; font:inherit;
+    font-size:11.5px; color:var(--ink-faint); cursor:pointer; text-align:left; }
+  .tkrow .tdesc.has{ color:var(--ink-soft); }
+  .tkrow .tdesc:hover{ color:var(--maroon-bright); }
+  .eform textarea.desctext{ min-height:340px; }
   .tkrow .tco{ margin-left:6px; font-size:11px; font-weight:500; color:var(--calm); text-decoration:none; }
   .tkrow .tco:hover{ text-decoration:underline; }
   .tkrow .tn{ color:var(--ink-soft); white-space:pre-wrap; }
@@ -662,6 +669,19 @@
     </div>
   </div>
 </div>
+<div id="descModal" class="overlay" hidden>
+  <div class="modal" style="max-width:720px;" role="dialog" aria-modal="true" aria-label="Description">
+    <div class="modal-hd"><h2 id="descTitle">Description</h2>
+      <p>Anything about this task: background, contacts, terms, links. Ctrl+Enter saves.</p></div>
+    <div class="modal-bd">
+      <div class="eform"><textarea id="descText" class="desctext" placeholder="Write anything about this task…"></textarea></div>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn" id="descCancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="descSave" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
 <datalist id="tkSectionList"></datalist>
 <datalist id="tkOwnerList"></datalist>
 <datalist id="ownerList"></datalist>
@@ -962,6 +982,8 @@
          cryptic Postgres string, so say what it actually means. */
       var msg = /history_dedupe/.test(err.message||"")
         ? "That company already has an identical entry on that date. Change the wording or the date, or delete the other one."
+        : /description/.test(err.message||"")
+        ? "Descriptions are not set up in the database yet. Run the description line of section 9 of supabase-schema.sql in Supabase."
         : "Could not save: "+err.message;
       toast(msg,"bad"); loadAll(); return false;
     }
@@ -1179,11 +1201,12 @@
   /* ---------- to do: writes ----------
      Same shape as saveCompany: apply locally, render, write, revert on error,
      and record the inverse first so Undo covers every change. */
-  var TK_COLS={ owner:"owner", section:"section", title:"title", waitingOn:"waiting_on",
+  var TK_COLS={ owner:"owner", section:"section", title:"title", description:"description", waitingOn:"waiting_on",
     company:"company", done:"done", doneAt:"done_at", sort:"sort", updates:"updates" };
-  var TK_NULLABLE=["owner","section","waiting_on","company","done_at"];
+  var TK_NULLABLE=["owner","section","description","waiting_on","company","done_at"];
   function rowToTask(r){
     return { id:r.id, owner:r.owner||"", section:r.section||"", title:r.title||"",
+      description:r.description||"",
       waitingOn:r.waiting_on||"", company:r.company||"", done:!!r.done, doneAt:r.done_at||"",
       sort:r.sort||0, updates:Array.isArray(r.updates)?r.updates:[],
       createdAt:r.created_at||"", updatedAt:r.updated_at||"" };
@@ -2012,7 +2035,7 @@
       if(tkF.hideDone && t.done) return false;
       if(!q) return true;
       var l=tkLatest(t);
-      return [t.title,t.section,t.waitingOn,t.company,t.owner,l?l.text:""].join(" ").toLowerCase().indexOf(q)>-1;
+      return [t.title,t.section,t.waitingOn,t.company,t.owner,t.description,l?l.text:""].join(" ").toLowerCase().indexOf(q)>-1;
     });
     var by={}; rows.forEach(function(t){ var k=t.section||"Other"; (by[k]=by[k]||[]).push(t); });
     var html=tkSectionOrder(Object.keys(by)).map(function(sec){
@@ -2029,6 +2052,7 @@
         e.stopPropagation();
         if(a==="tick") toggleTask(id);
         if(a==="edit") openTaskModal({id:id});
+        if(a==="desc") openDescModal(id);
       });
     });
   }
@@ -2040,8 +2064,10 @@
     return '<div class="tkrow'+(t.done?" done":"")+'">'+
       '<input type="checkbox" data-act="tick" data-tk="'+esc(t.id)+'"'+(t.done?" checked":"")+
         (readOnly?" disabled":"")+' aria-label="Done: '+esc(t.title)+'">'+
-      '<div><span class="tt">'+esc(t.title)+'</span>'+
+      '<div><button type="button" class="tt" data-act="desc" data-tk="'+esc(t.id)+'">'+esc(t.title)+'</button>'+
         (coId? '<a class="tco" href="#tracker/'+esc(coId)+'">tracker \u2197</a>' : "")+
+        '<button type="button" class="tdesc'+(t.description?" has":"")+'" data-act="desc" data-tk="'+esc(t.id)+'">'+
+          (t.description? esc(tkSnippet(t.description)) : "+ Description")+'</button>'+
         (tkF.owner==="all" && t.owner? '<div class="nd">'+esc(t.owner)+'</div>' : "")+'</div>'+
       '<div>'+(t.waitingOn? '<span class="pill p-warn">Pending '+esc(t.waitingOn)+'</span>'
                           : (t.done? "" : '<span class="pill p-calm">With '+esc(t.owner||"owner")+'</span>'))+'</div>'+
@@ -2049,6 +2075,32 @@
       '<div class="tage'+(stale?" stale":"")+'" title="Last touched">'+esc(ageTxt)+'</div>'+
       '<div><button class="btn btn-sm" type="button" data-act="edit" data-tk="'+esc(t.id)+'">Update</button></div>'+
     '</div>';
+  }
+  /* The description is free text with no shape, kept apart from the dated
+     updates log: background that stays true, not what happened today. The
+     row shows its first line; the pop out holds the whole of it. */
+  var descId=null;
+  function tkSnippet(d){
+    var line=String(d).split(/\n/).filter(function(x){ return x.trim(); })[0]||"";
+    return line.length>80? line.slice(0,80)+"\u2026" : line;
+  }
+  function openDescModal(id){
+    var t=findTask(id); if(!t) return;
+    descId=id;
+    $("descTitle").textContent=t.title;
+    $("descText").value=t.description;
+    $("descText").readOnly=readOnly;
+    $("descSave").hidden=readOnly;
+    $("descModal").hidden=false;
+    setTimeout(function(){ $("descText").focus(); }, 0);
+  }
+  function saveDescModal(){
+    var t=descId? findTask(descId) : null;
+    $("descModal").hidden=true; descId=null;
+    if(!t || readOnly) return;
+    var v=$("descText").value.replace(/\s+$/,"");
+    if(v===t.description) return;
+    saveTask(t.id, {description:v}, "described "+t.title);
   }
   function openTaskModal(opts){
     if(readOnly){ toast("Read only view.","warn"); return; }
@@ -2538,6 +2590,10 @@
     $("tkAdd").addEventListener("click",function(){ openTaskModal(); });
     $("tkCancel").addEventListener("click",function(){ $("taskModal").hidden=true; taskEditId=null; });
     $("tkSave").addEventListener("click", saveTaskModal);
+    $("descSave").addEventListener("click", saveDescModal);
+    $("descCancel").addEventListener("click",function(){ $("descModal").hidden=true; descId=null; });
+    $("descText").addEventListener("keydown",function(e){
+      if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); saveDescModal(); } });
     $("tkNote").addEventListener("keydown",function(e){
       if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); saveTaskModal(); } });
     $("tkDelete").addEventListener("click",function(){
@@ -2595,7 +2651,7 @@
         e.preventDefault(); doUndo(); return;
       }
       if(e.key==="Escape"){
-        var open=["confirmModal","notiModal","histModal","taskModal"].filter(function(id){ return !$(id).hidden; });
+        var open=["confirmModal","notiModal","histModal","taskModal","descModal"].filter(function(id){ return !$(id).hidden; });
         if(open.length){ $(open[0]).hidden=true; return; }
         if(editing){ editing=null; renderTracker(); return; }
         if(openId){ openId=null; syncHash(); renderTracker(); }
